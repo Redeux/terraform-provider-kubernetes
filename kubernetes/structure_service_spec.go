@@ -2,7 +2,7 @@ package kubernetes
 
 import (
 	gversion "github.com/hashicorp/go-version"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/version"
@@ -59,12 +59,15 @@ func flattenServiceSpec(in v1.ServiceSpec) []interface{} {
 	if in.ExternalTrafficPolicy != "" {
 		att["external_traffic_policy"] = string(in.ExternalTrafficPolicy)
 	}
+
+	att["health_check_node_port"] = int(in.HealthCheckNodePort)
+
 	return []interface{}{att}
 }
 
-func flattenLoadBalancerIngress(in []v1.LoadBalancerIngress) []interface{} {
-	out := make([]interface{}, len(in), len(in))
-	for i, ingress := range in {
+func flattenLoadBalancerStatus(in v1.LoadBalancerStatus) []interface{} {
+	out := make([]interface{}, len(in.Ingress), len(in.Ingress))
+	for i, ingress := range in.Ingress {
 		att := make(map[string]interface{})
 
 		att["ip"] = ingress.IP
@@ -72,7 +75,12 @@ func flattenLoadBalancerIngress(in []v1.LoadBalancerIngress) []interface{} {
 
 		out[i] = att
 	}
-	return out
+
+	return []interface{}{
+		map[string][]interface{}{
+			"ingress": out,
+		},
+	}
 }
 
 // Expanders
@@ -141,6 +149,10 @@ func expandServiceSpec(l []interface{}) v1.ServiceSpec {
 	if v, ok := in["external_traffic_policy"].(string); ok {
 		obj.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyType(v)
 	}
+	if v, ok := in["health_check_node_port"].(int); ok {
+		obj.HealthCheckNodePort = int32(v)
+	}
+
 	return obj
 }
 
@@ -228,6 +240,12 @@ func patchServiceSpec(keyPrefix, pathPrefix string, d *schema.ResourceData, v *v
 				Path: p,
 			})
 		}
+	}
+	if d.HasChange(keyPrefix + "health_check_node_port") {
+		ops = append(ops, &ReplaceOperation{
+			Path:  pathPrefix + "healthCheckNodePort",
+			Value: int32(d.Get(keyPrefix + "health_check_node_port").(int)),
+		})
 	}
 	return ops, nil
 }

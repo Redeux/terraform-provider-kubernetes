@@ -1,7 +1,6 @@
 ---
 layout: "kubernetes"
 page_title: "Kubernetes: kubernetes_persistent_volume"
-sidebar_current: "docs-kubernetes-resource-persistent-volume-x"
 description: |-
   A Persistent Volume (PV) is a piece of networked storage in the cluster that has been provisioned by an administrator.
 ---
@@ -9,7 +8,6 @@ description: |-
 # kubernetes_persistent_volume
 
 The resource provides a piece of networked storage in the cluster provisioned by an administrator. It is a resource in the cluster just like a node is a cluster resource. Persistent Volumes have a lifecycle independent of any individual pod that uses the PV.
-
 For more info see [Kubernetes reference](https://kubernetes.io/docs/concepts/storage/persistent-volumes)/
 
 ## Example Usage
@@ -33,6 +31,53 @@ resource "kubernetes_persistent_volume" "example" {
 }
 ```
 
+## Example: Persistent Volume using Azure Managed Disk
+
+```hcl
+resource "kubernetes_persistent_volume" "example" {
+  metadata {
+    name = "example"
+  }
+  spec {
+    capacity = {
+      storage = "1Gi"
+    }
+    access_modes = ["ReadWriteOnce"]
+    persistent_volume_source {
+      azure_disk {
+        caching_mode  = "None"
+        data_disk_uri = azurerm_managed_disk.example.id
+        disk_name     = "example"
+        kind          = "Managed"
+      }
+    }
+  }
+}
+
+provider "azurerm" {
+  version = ">=2.20.0"
+  features {}
+}
+
+resource "azurerm_resource_group" "example" {
+  name     = "example"
+  location = "westus2"
+}
+
+
+resource "azurerm_managed_disk" "example" {
+  name                 = "example"
+  location             = azurerm_resource_group.example.location
+  resource_group_name  = azurerm_resource_group.example.name
+  storage_account_type = "Standard_LRS"
+  create_option        = "Empty"
+  disk_size_gb         = "1"
+  tags = {
+    environment = azurerm_resource_group.example.name
+  }
+}
+```
+
 ## Argument Reference
 
 The following arguments are supported:
@@ -46,13 +91,17 @@ The following arguments are supported:
 
 #### Arguments
 
-* `access_modes` - (Required) Contains all ways the volume can be mounted. For more info see [Kubernetes reference](http://kubernetes.io/docs/user-guide/persistent-volumes#access-modes)
+* `access_modes` - (Required) Contains all ways the volume can be mounted. Valid values are `ReadWriteOnce`, `ReadOnlyMany`, `ReadWriteMany`. For more info see [Kubernetes reference](http://kubernetes.io/docs/user-guide/persistent-volumes#access-modes)
 * `capacity` - (Required) A description of the persistent volume's resources and capacity. For more info see [Kubernetes reference](http://kubernetes.io/docs/user-guide/persistent-volumes#capacity)
 * `node_affinity` - (Optional) NodeAffinity defines constraints that limit what nodes this volume can be accessed from. This field influences the scheduling of pods that use this volume.
-* `persistent_volume_reclaim_policy` - (Optional) What happens to a persistent volume when released from its claim. Valid options are Retain (default) and Recycle. Recycling must be supported by the volume plugin underlying this persistent volume. For more info see [Kubernetes reference](http://kubernetes.io/docs/user-guide/persistent-volumes#recycling-policy)
+* `persistent_volume_reclaim_policy` - (Optional) What happens to a persistent volume when released from its claim. Valid options are Retain (default), Delete and Recycle. Recycling must be supported by the volume plugin underlying this persistent volume. For more info see [Kubernetes reference](http://kubernetes.io/docs/user-guide/persistent-volumes#recycling-policy)
 * `persistent_volume_source` - (Required) The specification of a persistent volume.
 * `storage_class_name` - (Optional) The name of the persistent volume's storage class. For more info see [Kubernetes reference](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#class)
-* `mount_options` - (Options) A Kubernetes administrator can specify additional mount options for when a Persistent Volume is mounted on a node. *Note: Not all Persistent Volume types support mount options.* For more info see [Kubernetes reference](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#mount-options)
+* `mount_options` - (Optional) A Kubernetes administrator can specify additional mount options for when a Persistent Volume is mounted on a node.
+
+~>  Not all Persistent Volume types support mount options. For more info see [Kubernetes reference](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#mount-options)
+
+* `volume_mode` - (Optional) Defines if a volume is used with a formatted filesystem or to remain in raw block state. Possible values are `Block` and `Filesystem`. Default value is `Filesystem`. For more info see [Kubernetes reference](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#volume-mode)
 
 ### `node_affinity`
 
@@ -90,6 +139,7 @@ The following arguments are supported:
 * `azure_file` - (Optional) Represents an Azure File Service mount on the host and bind mount to the pod.
 * `ceph_fs` - (Optional) Represents a Ceph FS mount on the host that shares a pod's lifetime
 * `cinder` - (Optional) Represents a cinder volume attached and mounted on kubelets host machine. For more info see http://releases.k8s.io/HEAD/examples/mysql-cinder-pd/README.md
+* `csi` - (Optional) CSI represents storage that is handled by an external CSI driver. For more info see [Kubernetes reference](https://kubernetes.io/docs/concepts/storage/volumes/#csi)
 * `fc` - (Optional) Represents a Fibre Channel resource that is attached to a kubelet's host machine and then exposed to the pod.
 * `flex_volume` - (Optional) Represents a generic volume resource that is provisioned/attached using an exec based plugin. This is an alpha feature and may change in future.
 * `flocker` - (Optional) Represents a Flocker volume attached to a kubelet's host machine and exposed to the pod for its usage. This depends on the Flocker control service being running
@@ -119,10 +169,11 @@ The following arguments are supported:
 #### Arguments
 
 * `caching_mode` - (Required) Host Caching mode: None, Read Only, Read Write.
-* `data_disk_uri` - (Required) The URI the data disk in the blob storage
-* `disk_name` - (Required) The Name of the data disk in the blob storage
+* `data_disk_uri` - (Required) The URI the data disk in the blob storage OR the resource ID of an Azure managed data disk if `kind` is `Managed`.
+* `disk_name` - (Required) The Name of the data disk in the blob storage OR the name of an Azure managed data disk if `kind` is `Managed`.
 * `fs_type` - (Optional) Filesystem type to mount. Must be a filesystem type supported by the host operating system. Ex. "ext4", "xfs", "ntfs". Implicitly inferred to be "ext4" if unspecified.
 * `read_only` - (Optional) Whether to force the read-only setting in VolumeMounts. Defaults to false (read/write).
+* `kind` - (Optional) The type for the data disk. Expected values: `Shared`, `Dedicated`, `Managed`. Defaults to `Shared`.
 
 ### `azure_file`
 
@@ -140,7 +191,7 @@ The following arguments are supported:
 * `path` - (Optional) Used as the mounted root, rather than the full Ceph tree, default is /
 * `read_only` - (Optional) Whether to force the read-only setting in VolumeMounts. Defaults to `false` (read/write). For more info see http://releases.k8s.io/HEAD/examples/volumes/cephfs/README.md#how-to-use-it
 * `secret_file` - (Optional) The path to key ring for User, default is /etc/ceph/user.secret For more info see http://releases.k8s.io/HEAD/examples/volumes/cephfs/README.md#how-to-use-it
-* `secret_ref` - (Optional) Reference to the authentication secret for User, default is empty. For more info see http://releases.k8s.io/HEAD/examples/volumes/cephfs/README.md#how-to-use-it
+* `secret_ref` - (Optional) Reference to the authentication secret for User, default is empty. For more info see http://releases.k8s.io/HEAD/examples/volumes/cephfs/README.md#how-to-use-it. see [secret_ref](#secret_ref) for more details.
 * `user` - (Optional) User is the rados user name, default is admin. For more info see http://releases.k8s.io/HEAD/examples/volumes/cephfs/README.md#how-to-use-it
 
 ### `cinder`
@@ -150,6 +201,20 @@ The following arguments are supported:
 * `fs_type` - (Optional) Filesystem type to mount. Must be a filesystem type supported by the host operating system. Examples: "ext4", "xfs", "ntfs". Implicitly inferred to be "ext4" if unspecified. For more info see http://releases.k8s.io/HEAD/examples/mysql-cinder-pd/README.md
 * `read_only` - (Optional) Whether to force the read-only setting in VolumeMounts. Defaults to false (read/write). For more info see http://releases.k8s.io/HEAD/examples/mysql-cinder-pd/README.md
 * `volume_id` - (Required) Volume ID used to identify the volume in Cinder. For more info see http://releases.k8s.io/HEAD/examples/mysql-cinder-pd/README.md
+
+### `csi`
+
+#### Arguments
+
+* `driver` - (Required) the name of the volume driver to use. For more info see [Kubernetes reference](https://kubernetes.io/docs/concepts/storage/volumes/#csi).
+* `volume_handle` - (Required) A map that specifies static properties of a volume. For more info see [Kubernetes reference](https://kubernetes.io/docs/concepts/storage/volumes/#csi).
+* `volume_attributes` - (Optional) Attributes of the volume to publish.
+* `fs_type` - (Optional) Filesystem type to mount. Must be a filesystem type supported by the host operating system. Ex. `ext4`, `xfs`, `ntfs`.
+* `read_only` - (Optional) Whether to set the read-only property in VolumeMounts to `true`. If omitted, the default is `false`.
+* `controller_publish_secret_ref` - (Optional) A reference to the secret object containing sensitive information to pass to the CSI driver to complete the CSI ControllerPublishVolume and ControllerUnpublishVolume calls. see [secret_ref](#secret_ref) for more details.
+* `node_stage_secret_ref` - (Optional) A reference to the secret object containing sensitive information to pass to the CSI driver to complete the CSI NodeStageVolume and NodeStageVolume and NodeUnstageVolume calls. see [secret_ref](#secret_ref) for more details.
+* `node_publish_secret_ref` - (Optional) A reference to the secret object containing sensitive information to pass to the CSI driver to complete the CSI NodePublishVolume and NodeUnpublishVolume calls. see [secret_ref](#secret_ref) for more details.
+* `controller_expand_secret_ref` - (Optional) A reference to the secret object containing sensitive information to pass to the CSI driver to complete the CSI ControllerExpandVolume call. see [secret_ref](#secret_ref) for more details.
 
 ### `fc`
 
@@ -168,7 +233,7 @@ The following arguments are supported:
 * `fs_type` - (Optional) Filesystem type to mount. Must be a filesystem type supported by the host operating system. Ex. "ext4", "xfs", "ntfs". The default filesystem depends on FlexVolume script.
 * `options` - (Optional) Extra command options if any.
 * `read_only` - (Optional) Whether to force the ReadOnly setting in VolumeMounts. Defaults to false (read/write).
-* `secret_ref` - (Optional) Reference to the secret object containing sensitive information to pass to the plugin scripts. This may be empty if no secret object is specified. If the secret object contains more than one secret, all secrets are passed to the plugin scripts.
+* `secret_ref` - (Optional) Reference to the secret object containing sensitive information to pass to the plugin scripts. This may be empty if no secret object is specified. If the secret object contains more than one secret, all secrets are passed to the plugin scripts. see [secret_ref](#secret_ref) for more details.
 
 ### `flocker`
 
@@ -223,11 +288,13 @@ The following arguments are supported:
 #### Arguments
 
 * `annotations` - (Optional) An unstructured key value map stored with the persistent volume that may be used to store arbitrary metadata. 
-**By default, the provider ignores any annotations whose key names end with *kubernetes.io*. This is necessary because such annotations can be mutated by server-side components and consequently cause a perpetual diff in the Terraform plan output. If you explicitly specify any such annotations in the configuration template then Terraform will consider these as normal resource attributes and manage them as expected (while still avoiding the perpetual diff problem).**
-For more info see [Kubernetes reference](http://kubernetes.io/docs/user-guide/annotations)
+
+~> By default, the provider ignores any annotations whose key names end with *kubernetes.io*. This is necessary because such annotations can be mutated by server-side components and consequently cause a perpetual diff in the Terraform plan output. If you explicitly specify any such annotations in the configuration template then Terraform will consider these as normal resource attributes and manage them as expected (while still avoiding the perpetual diff problem). For more info info see [Kubernetes reference](http://kubernetes.io/docs/user-guide/annotations)
+
 * `labels` - (Optional) Map of string keys and values that can be used to organize and categorize (scope and select) the persistent volume. May match selectors of replication controllers and services. 
-**By default, the provider ignores any labels whose key names end with *kubernetes.io*. This is necessary because such labels can be mutated by server-side components and consequently cause a perpetual diff in the Terraform plan output. If you explicitly specify any such labels in the configuration template then Terraform will consider these as normal resource attributes and manage them as expected (while still avoiding the perpetual diff problem).**
-For more info see [Kubernetes reference](http://kubernetes.io/docs/user-guide/labels)
+
+~> By default, the provider ignores any labels whose key names end with *kubernetes.io*. This is necessary because such labels can be mutated by server-side components and consequently cause a perpetual diff in the Terraform plan output. If you explicitly specify any such labels in the configuration template then Terraform will consider these as normal resource attributes and manage them as expected (while still avoiding the perpetual diff problem). For more info info see [Kubernetes reference](http://kubernetes.io/docs/user-guide/labels)
+
 * `name` - (Optional) Name of the persistent volume, must be unique. Cannot be updated. For more info see [Kubernetes reference](http://kubernetes.io/docs/user-guide/identifiers#names)
 
 #### Attributes
@@ -273,13 +340,14 @@ For more info see [Kubernetes reference](http://kubernetes.io/docs/user-guide/la
 * `rbd_image` - (Required) The rados image name. For more info see http://releases.k8s.io/HEAD/examples/volumes/rbd/README.md#how-to-use-it
 * `rbd_pool` - (Optional) The rados pool name. Default is rbd. For more info see http://releases.k8s.io/HEAD/examples/volumes/rbd/README.md#how-to-use-it.
 * `read_only` - (Optional) Whether to force the read-only setting in VolumeMounts. Defaults to false. For more info see http://releases.k8s.io/HEAD/examples/volumes/rbd/README.md#how-to-use-it
-* `secret_ref` - (Optional) Name of the authentication secret for RBDUser. If provided overrides keyring. Default is nil. For more info see http://releases.k8s.io/HEAD/examples/volumes/rbd/README.md#how-to-use-it
+* `secret_ref` - (Optional) Name of the authentication secret for RBDUser. If provided overrides keyring. Default is nil. For more info see http://releases.k8s.io/HEAD/examples/volumes/rbd/README.md#how-to-use-it. see [secret_ref](#secret_ref) for more details.
 
 ### `secret_ref`
 
 #### Arguments
 
 * `name` - (Optional) Name of the referent. For more info see [Kubernetes reference](http://kubernetes.io/docs/user-guide/identifiers#names)
+* `namespace` - (Optional) The Namespace of the referent secret.
 
 ### `vsphere_volume`
 

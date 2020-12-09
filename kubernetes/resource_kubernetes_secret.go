@@ -1,25 +1,25 @@
 package kubernetes
 
 import (
-	"fmt"
+	"context"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"log"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	pkgApi "k8s.io/apimachinery/pkg/types"
 )
 
 func resourceKubernetesSecret() *schema.Resource {
 	return &schema.Resource{
-		Create: resourceKubernetesSecretCreate,
-		Read:   resourceKubernetesSecretRead,
-		Exists: resourceKubernetesSecretExists,
-		Update: resourceKubernetesSecretUpdate,
-		Delete: resourceKubernetesSecretDelete,
+		CreateContext: resourceKubernetesSecretCreate,
+		ReadContext:   resourceKubernetesSecretRead,
+		UpdateContext: resourceKubernetesSecretUpdate,
+		DeleteContext: resourceKubernetesSecretDelete,
 		Importer: &schema.ResourceImporter{
-			State: schema.ImportStatePassthrough,
+			StateContext: schema.ImportStatePassthroughContext,
 		},
 
 		Schema: map[string]*schema.Schema{
@@ -41,10 +41,10 @@ func resourceKubernetesSecret() *schema.Resource {
 	}
 }
 
-func resourceKubernetesSecretCreate(d *schema.ResourceData, meta interface{}) error {
+func resourceKubernetesSecretCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	metadata := expandMetadata(d.Get("metadata").([]interface{}))
@@ -58,38 +58,45 @@ func resourceKubernetesSecretCreate(d *schema.ResourceData, meta interface{}) er
 	}
 
 	log.Printf("[INFO] Creating new secret: %#v", secret)
-	out, err := conn.CoreV1().Secrets(metadata.Namespace).Create(&secret)
+	out, err := conn.CoreV1().Secrets(metadata.Namespace).Create(ctx, &secret, metav1.CreateOptions{})
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	log.Printf("[INFO] Submitting new secret: %#v", out)
 	d.SetId(buildId(out.ObjectMeta))
 
-	return resourceKubernetesSecretRead(d, meta)
+	return resourceKubernetesSecretRead(ctx, d, meta)
 }
 
-func resourceKubernetesSecretRead(d *schema.ResourceData, meta interface{}) error {
+func resourceKubernetesSecretRead(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	exists, err := resourceKubernetesSecretExists(ctx, d, meta)
+	if err != nil {
+		return diag.FromErr(err)
+	}
+	if !exists {
+		return diag.Diagnostics{}
+	}
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	namespace, name, err := idParts(d.Id())
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	log.Printf("[INFO] Reading secret %s", name)
-	secret, err := conn.CoreV1().Secrets(namespace).Get(name, meta_v1.GetOptions{})
+	secret, err := conn.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	log.Printf("[INFO] Received secret: %#v", secret)
 	err = d.Set("metadata", flattenMetadata(secret.ObjectMeta, d))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	d.Set("data", flattenByteMapToStringMap(secret.Data))
@@ -98,15 +105,15 @@ func resourceKubernetesSecretRead(d *schema.ResourceData, meta interface{}) erro
 	return nil
 }
 
-func resourceKubernetesSecretUpdate(d *schema.ResourceData, meta interface{}) error {
+func resourceKubernetesSecretUpdate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	namespace, name, err := idParts(d.Id())
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	ops := patchMetadata("metadata.0.", "/metadata/", d)
@@ -123,36 +130,36 @@ func resourceKubernetesSecretUpdate(d *schema.ResourceData, meta interface{}) er
 
 	data, err := ops.MarshalJSON()
 	if err != nil {
-		return fmt.Errorf("Failed to marshal update operations: %s", err)
+		return diag.Errorf("Failed to marshal update operations: %s", err)
 	}
 
 	log.Printf("[INFO] Updating secret %q: %v", name, data)
-	out, err := conn.CoreV1().Secrets(namespace).Patch(name, pkgApi.JSONPatchType, data)
+	out, err := conn.CoreV1().Secrets(namespace).Patch(ctx, name, pkgApi.JSONPatchType, data, metav1.PatchOptions{})
 	if err != nil {
-		return fmt.Errorf("Failed to update secret: %s", err)
+		return diag.Errorf("Failed to update secret: %s", err)
 	}
 
 	log.Printf("[INFO] Submitting updated secret: %#v", out)
 	d.SetId(buildId(out.ObjectMeta))
 
-	return resourceKubernetesSecretRead(d, meta)
+	return resourceKubernetesSecretRead(ctx, d, meta)
 }
 
-func resourceKubernetesSecretDelete(d *schema.ResourceData, meta interface{}) error {
+func resourceKubernetesSecretDelete(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	namespace, name, err := idParts(d.Id())
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	log.Printf("[INFO] Deleting secret: %q", name)
-	err = conn.CoreV1().Secrets(namespace).Delete(name, &meta_v1.DeleteOptions{})
+	err = conn.CoreV1().Secrets(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	log.Printf("[INFO] Secret %s deleted", name)
@@ -162,7 +169,7 @@ func resourceKubernetesSecretDelete(d *schema.ResourceData, meta interface{}) er
 	return nil
 }
 
-func resourceKubernetesSecretExists(d *schema.ResourceData, meta interface{}) (bool, error) {
+func resourceKubernetesSecretExists(ctx context.Context, d *schema.ResourceData, meta interface{}) (bool, error) {
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
 		return false, err
@@ -174,7 +181,7 @@ func resourceKubernetesSecretExists(d *schema.ResourceData, meta interface{}) (b
 	}
 
 	log.Printf("[INFO] Checking secret %s", name)
-	_, err = conn.CoreV1().Secrets(namespace).Get(name, meta_v1.GetOptions{})
+	_, err = conn.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		if statusErr, ok := err.(*errors.StatusError); ok && statusErr.ErrStatus.Code == 404 {
 			return false, nil

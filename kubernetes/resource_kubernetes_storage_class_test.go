@@ -1,131 +1,216 @@
 package kubernetes
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"regexp"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/acctest"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	api "k8s.io/api/storage/v1"
-	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func TestAccKubernetesStorageClass_basic(t *testing.T) {
+func TestAccKubernetesStorageClass_minikube(t *testing.T) {
 	var conf api.StorageClass
 	name := fmt.Sprintf("tf-acc-test-%s", acctest.RandStringFromCharSet(10, acctest.CharSetAlphaNum))
+	resourceName := "kubernetes_storage_class.test"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:      func() { testAccPreCheck(t) },
-		IDRefreshName: "kubernetes_storage_class.test",
-		Providers:     testAccProviders,
-		CheckDestroy:  testAccCheckKubernetesStorageClassDestroy,
+		PreCheck:          func() { testAccPreCheck(t); skipIfNotRunningInMinikube(t) },
+		IDRefreshName:     resourceName,
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccCheckKubernetesStorageClassDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccKubernetesStorageClassConfig_basic(name),
+				Config: testAccKubernetesStorageClassConfig_basic(name, "k8s.io/minikube-hostpath"),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					testAccCheckKubernetesStorageClassExists("kubernetes_storage_class.test", &conf),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "metadata.0.annotations.%", "2"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "metadata.0.annotations.TestAnnotationOne", "one"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "metadata.0.annotations.TestAnnotationTwo", "two"),
-					testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{"TestAnnotationOne": "one", "TestAnnotationTwo": "two"}),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "metadata.0.labels.%", "3"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "metadata.0.labels.TestLabelOne", "one"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "metadata.0.labels.TestLabelTwo", "two"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "metadata.0.labels.TestLabelThree", "three"),
-					testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{"TestLabelOne": "one", "TestLabelTwo": "two", "TestLabelThree": "three"}),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "metadata.0.name", name),
-					resource.TestCheckResourceAttrSet("kubernetes_storage_class.test", "metadata.0.generation"),
-					resource.TestCheckResourceAttrSet("kubernetes_storage_class.test", "metadata.0.resource_version"),
-					resource.TestCheckResourceAttrSet("kubernetes_storage_class.test", "metadata.0.self_link"),
-					resource.TestCheckResourceAttrSet("kubernetes_storage_class.test", "metadata.0.uid"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "storage_provisioner", "kubernetes.io/gce-pd"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "reclaim_policy", "Delete"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "volume_binding_mode", "Immediate"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "allow_volume_expansion", "true"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "mount_options.#", "2"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "mount_options.2356372769", "foo"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "mount_options.1996459178", "bar"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "parameters.%", "1"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "parameters.type", "pd-ssd"),
-					testAccCheckStorageClassParameters(&conf, map[string]string{"type": "pd-ssd"}),
+					testAccCheckKubernetesStorageClassExists(resourceName, &conf),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.annotations.%", "2"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.annotations.TestAnnotationOne", "one"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.annotations.TestAnnotationTwo", "two"),
+					//testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{"TestAnnotationOne": "one", "TestAnnotationTwo": "two"}),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.labels.%", "3"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.labels.TestLabelOne", "one"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.labels.TestLabelTwo", "two"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.labels.TestLabelThree", "three"),
+					//testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{"TestLabelOne": "one", "TestLabelTwo": "two", "TestLabelThree": "three"}),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.name", name),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.generation"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.resource_version"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.self_link"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.uid"),
+					resource.TestCheckResourceAttr(resourceName, "storage_provisioner", "k8s.io/minikube-hostpath"),
+					resource.TestCheckResourceAttr(resourceName, "reclaim_policy", "Delete"),
+					resource.TestCheckResourceAttr(resourceName, "volume_binding_mode", "Immediate"),
+					resource.TestCheckResourceAttr(resourceName, "allow_volume_expansion", "true"),
+					resource.TestCheckResourceAttr(resourceName, "mount_options.#", "2"),
+					resource.TestCheckResourceAttr(resourceName, "mount_options.0", "foo"),
+					resource.TestCheckResourceAttr(resourceName, "mount_options.1", "bar"),
 				),
 			},
 			{
-				Config: testAccKubernetesStorageClassConfig_modified(name),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					testAccCheckKubernetesStorageClassExists("kubernetes_storage_class.test", &conf),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "metadata.0.annotations.%", "2"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "metadata.0.annotations.TestAnnotationOne", "one"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "metadata.0.annotations.Different", "1234"),
-					testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{"TestAnnotationOne": "one", "Different": "1234"}),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "metadata.0.labels.%", "2"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "metadata.0.labels.TestLabelOne", "one"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "metadata.0.labels.TestLabelThree", "three"),
-					testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{"TestLabelOne": "one", "TestLabelThree": "three"}),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "metadata.0.name", name),
-					resource.TestCheckResourceAttrSet("kubernetes_storage_class.test", "metadata.0.generation"),
-					resource.TestCheckResourceAttrSet("kubernetes_storage_class.test", "metadata.0.resource_version"),
-					resource.TestCheckResourceAttrSet("kubernetes_storage_class.test", "metadata.0.self_link"),
-					resource.TestCheckResourceAttrSet("kubernetes_storage_class.test", "metadata.0.uid"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "storage_provisioner", "kubernetes.io/gce-pd"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "reclaim_policy", "Retain"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "volume_binding_mode", "WaitForFirstConsumer"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "allow_volume_expansion", "false"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "mount_options.#", "1"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "mount_options.2356372769", "foo"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "parameters.%", "2"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "parameters.type", "pd-standard"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "parameters.zones", "us-west1-a,us-west1-b"),
-					testAccCheckStorageClassParameters(&conf, map[string]string{"type": "pd-standard", "zones": "us-west1-a,us-west1-b"}),
-				),
+				ResourceName:            resourceName,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"metadata.0.resource_version"},
 			},
 			{
-				Config: testAccKubernetesStorageClassConfig_noParameters(name),
+				Config: testAccKubernetesStorageClassConfig_modified(name, "k8s.io/minikube-hostpath"),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					testAccCheckKubernetesStorageClassExists("kubernetes_storage_class.test", &conf),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "metadata.0.annotations.%", "0"),
-					testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{}),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "metadata.0.labels.%", "0"),
-					testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{}),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "metadata.0.name", name),
-					resource.TestCheckResourceAttrSet("kubernetes_storage_class.test", "metadata.0.generation"),
-					resource.TestCheckResourceAttrSet("kubernetes_storage_class.test", "metadata.0.resource_version"),
-					resource.TestCheckResourceAttrSet("kubernetes_storage_class.test", "metadata.0.self_link"),
-					resource.TestCheckResourceAttrSet("kubernetes_storage_class.test", "metadata.0.uid"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "storage_provisioner", "kubernetes.io/gce-pd"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "reclaim_policy", "Delete"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "volume_binding_mode", "Immediate"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "allow_volume_expansion", "true"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "mount_options.#", "0"),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "parameters.%", "0"),
-					testAccCheckStorageClassParameters(&conf, map[string]string{}),
+					testAccCheckKubernetesStorageClassExists(resourceName, &conf),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.annotations.%", "2"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.annotations.TestAnnotationOne", "one"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.annotations.Different", "1234"),
+					//testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{"TestAnnotationOne": "one", "Different": "1234"}),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.labels.%", "2"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.labels.TestLabelOne", "one"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.labels.TestLabelThree", "three"),
+					//testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{"TestLabelOne": "one", "TestLabelThree": "three"}),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.name", name),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.generation"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.resource_version"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.self_link"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.uid"),
+					resource.TestCheckResourceAttr(resourceName, "storage_provisioner", "k8s.io/minikube-hostpath"),
+					resource.TestCheckResourceAttr(resourceName, "reclaim_policy", "Retain"),
+					resource.TestCheckResourceAttr(resourceName, "volume_binding_mode", "WaitForFirstConsumer"),
+					resource.TestCheckResourceAttr(resourceName, "allow_volume_expansion", "false"),
+					resource.TestCheckResourceAttr(resourceName, "mount_options.#", "1"),
+					resource.TestCheckResourceAttr(resourceName, "mount_options.0", "foo"),
 				),
 			},
 		},
 	})
 }
 
-func TestAccKubernetesStorageClass_importBasic(t *testing.T) {
-	resourceName := "kubernetes_storage_class.test"
+func TestAccKubernetesStorageClass_basic(t *testing.T) {
+	var conf api.StorageClass
 	name := fmt.Sprintf("tf-acc-test-%s", acctest.RandStringFromCharSet(10, acctest.CharSetAlphaNum))
+	resourceName := "kubernetes_storage_class.test"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckKubernetesStorageClassDestroy,
+		PreCheck:          func() { testAccPreCheck(t); skipIfNotRunningInGke(t) },
+		IDRefreshName:     resourceName,
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccCheckKubernetesStorageClassDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccKubernetesStorageClassConfig_basic(name),
+				Config: testAccKubernetesStorageClassConfig_basic(name, "kubernetes.io/gce-pd"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckKubernetesStorageClassExists(resourceName, &conf),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.annotations.%", "2"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.annotations.TestAnnotationOne", "one"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.annotations.TestAnnotationTwo", "two"),
+					//testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{"TestAnnotationOne": "one", "TestAnnotationTwo": "two"}),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.labels.%", "3"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.labels.TestLabelOne", "one"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.labels.TestLabelTwo", "two"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.labels.TestLabelThree", "three"),
+					//testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{"TestLabelOne": "one", "TestLabelTwo": "two", "TestLabelThree": "three"}),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.name", name),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.generation"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.resource_version"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.self_link"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.uid"),
+					resource.TestCheckResourceAttr(resourceName, "storage_provisioner", "kubernetes.io/gce-pd"),
+					resource.TestCheckResourceAttr(resourceName, "reclaim_policy", "Delete"),
+					resource.TestCheckResourceAttr(resourceName, "volume_binding_mode", "Immediate"),
+					resource.TestCheckResourceAttr(resourceName, "allow_volume_expansion", "true"),
+					resource.TestCheckResourceAttr(resourceName, "mount_options.#", "2"),
+					resource.TestCheckResourceAttr(resourceName, "mount_options.0", "foo"),
+					resource.TestCheckResourceAttr(resourceName, "mount_options.0", "bar"),
+					resource.TestCheckResourceAttr(resourceName, "parameters.%", "1"),
+					resource.TestCheckResourceAttr(resourceName, "parameters.type", "pd-ssd"),
+					testAccCheckStorageClassParameters(&conf, map[string]string{"type": "pd-ssd"}),
+				),
 			},
-
 			{
 				ResourceName:            resourceName,
 				ImportState:             true,
 				ImportStateVerify:       true,
 				ImportStateVerifyIgnore: []string{"metadata.0.resource_version"},
+			},
+			{
+				Config: testAccKubernetesStorageClassConfig_modified(name, "kubernetes.io/gce-pd"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckKubernetesStorageClassExists(resourceName, &conf),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.annotations.%", "2"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.annotations.TestAnnotationOne", "one"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.annotations.Different", "1234"),
+					//testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{"TestAnnotationOne": "one", "Different": "1234"}),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.labels.%", "2"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.labels.TestLabelOne", "one"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.labels.TestLabelThree", "three"),
+					//testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{"TestLabelOne": "one", "TestLabelThree": "three"}),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.name", name),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.generation"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.resource_version"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.self_link"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.uid"),
+					resource.TestCheckResourceAttr(resourceName, "storage_provisioner", "kubernetes.io/gce-pd"),
+					resource.TestCheckResourceAttr(resourceName, "reclaim_policy", "Retain"),
+					resource.TestCheckResourceAttr(resourceName, "volume_binding_mode", "WaitForFirstConsumer"),
+					resource.TestCheckResourceAttr(resourceName, "allow_volume_expansion", "false"),
+					resource.TestCheckResourceAttr(resourceName, "mount_options.#", "1"),
+					resource.TestCheckResourceAttr(resourceName, "mount_options.0", "foo"),
+					resource.TestCheckResourceAttr(resourceName, "parameters.%", "2"),
+					resource.TestCheckResourceAttr(resourceName, "parameters.type", "pd-standard"),
+					resource.TestCheckResourceAttr(resourceName, "parameters.zones", "us-west1-a,us-west1-b"),
+					testAccCheckStorageClassParameters(&conf, map[string]string{"type": "pd-standard", "zones": "us-west1-a,us-west1-b"}),
+				),
+			},
+			{
+				Config: testAccKubernetesStorageClassConfig_noParameters(name, "kubernetes.io/gce-pd"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckKubernetesStorageClassExists(resourceName, &conf),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.annotations.%", "0"),
+					//testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{}),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.labels.%", "0"),
+					//testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{}),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.name", name),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.generation"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.resource_version"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.self_link"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.uid"),
+					resource.TestCheckResourceAttr(resourceName, "storage_provisioner", "kubernetes.io/gce-pd"),
+					resource.TestCheckResourceAttr(resourceName, "reclaim_policy", "Delete"),
+					resource.TestCheckResourceAttr(resourceName, "volume_binding_mode", "Immediate"),
+					resource.TestCheckResourceAttr(resourceName, "allow_volume_expansion", "true"),
+					resource.TestCheckResourceAttr(resourceName, "mount_options.#", "0"),
+					resource.TestCheckResourceAttr(resourceName, "parameters.%", "0"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccKubernetesStorageClass_allowedTopologies_minikube(t *testing.T) {
+	var conf api.StorageClass
+	name := fmt.Sprintf("tf-acc-test-%s", acctest.RandStringFromCharSet(10, acctest.CharSetAlphaNum))
+	resourceName := "kubernetes_storage_class.test"
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t); skipIfNotRunningInMinikube(t) },
+		IDRefreshName:     resourceName,
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccCheckKubernetesStorageClassDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccKubernetesStorageClassConfig_allowedTopologies(name, "k8s.io/minikube-hostpath"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckKubernetesStorageClassExists(resourceName, &conf),
+					resource.TestCheckResourceAttr(resourceName, "allowed_topologies.#", "1"),
+					resource.TestCheckResourceAttr(resourceName, "allowed_topologies.0.match_label_expressions.#", "1"),
+					resource.TestCheckResourceAttr(resourceName, "allowed_topologies.0.match_label_expressions.0.key", "failure-domain.beta.kubernetes.io/zone"),
+					resource.TestCheckResourceAttr(resourceName, "allowed_topologies.0.match_label_expressions.0.values.#", "2"),
+					resource.TestCheckResourceAttr(resourceName, "allowed_topologies.0.match_label_expressions.0.values.0", "us-west1-a"),
+					resource.TestCheckResourceAttr(resourceName, "allowed_topologies.0.match_label_expressions.0.values.1", "us-west1-b"),
+					testAccCheckStorageClassParameters(&conf, map[string]string{}),
+				),
 			},
 		},
 	})
@@ -134,46 +219,30 @@ func TestAccKubernetesStorageClass_importBasic(t *testing.T) {
 func TestAccKubernetesStorageClass_generatedName(t *testing.T) {
 	var conf api.StorageClass
 	prefix := "tf-acc-test-gen-"
+	resourceName := "kubernetes_storage_class.test"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:      func() { testAccPreCheck(t) },
-		IDRefreshName: "kubernetes_storage_class.test",
-		Providers:     testAccProviders,
-		CheckDestroy:  testAccCheckKubernetesStorageClassDestroy,
+		PreCheck:          func() { testAccPreCheck(t); skipIfNotRunningInMinikube(t) },
+		IDRefreshName:     resourceName,
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccCheckKubernetesStorageClassDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccKubernetesStorageClassConfig_generatedName(prefix),
+				Config: testAccKubernetesStorageClassConfig_generatedName(prefix, "k8s.io/minikube"),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					testAccCheckKubernetesStorageClassExists("kubernetes_storage_class.test", &conf),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "metadata.0.annotations.%", "0"),
-					testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{}),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "metadata.0.labels.%", "0"),
-					testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{}),
-					resource.TestCheckResourceAttr("kubernetes_storage_class.test", "metadata.0.generate_name", prefix),
-					resource.TestMatchResourceAttr("kubernetes_storage_class.test", "metadata.0.name", regexp.MustCompile("^"+prefix)),
-					resource.TestCheckResourceAttrSet("kubernetes_storage_class.test", "metadata.0.generation"),
-					resource.TestCheckResourceAttrSet("kubernetes_storage_class.test", "metadata.0.resource_version"),
-					resource.TestCheckResourceAttrSet("kubernetes_storage_class.test", "metadata.0.self_link"),
-					resource.TestCheckResourceAttrSet("kubernetes_storage_class.test", "metadata.0.uid"),
+					testAccCheckKubernetesStorageClassExists(resourceName, &conf),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.annotations.%", "0"),
+					//testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{}),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.labels.%", "0"),
+					//testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{}),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.generate_name", prefix),
+					resource.TestMatchResourceAttr(resourceName, "metadata.0.name", regexp.MustCompile("^"+prefix)),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.generation"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.resource_version"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.self_link"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.uid"),
 				),
 			},
-		},
-	})
-}
-
-func TestAccKubernetesStorageClass_importGeneratedName(t *testing.T) {
-	resourceName := "kubernetes_storage_class.test"
-	prefix := "tf-acc-test-gen-import-"
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckKubernetesStorageClassDestroy,
-		Steps: []resource.TestStep{
-			{
-				Config: testAccKubernetesStorageClassConfig_generatedName(prefix),
-			},
-
 			{
 				ResourceName:            resourceName,
 				ImportState:             true,
@@ -199,16 +268,18 @@ func testAccCheckStorageClassParameters(m *api.StorageClass, expected map[string
 
 func testAccCheckKubernetesStorageClassDestroy(s *terraform.State) error {
 	conn, err := testAccProvider.Meta().(KubeClientsets).MainClientset()
+
 	if err != nil {
 		return err
 	}
+	ctx := context.TODO()
 
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "kubernetes_storage_class" {
 			continue
 		}
 		name := rs.Primary.ID
-		resp, err := conn.StorageV1().StorageClasses().Get(name, meta_v1.GetOptions{})
+		resp, err := conn.StorageV1().StorageClasses().Get(ctx, name, metav1.GetOptions{})
 		if err == nil {
 			if resp.Name == rs.Primary.ID {
 				return fmt.Errorf("Storage class still exists: %s", rs.Primary.ID)
@@ -230,9 +301,10 @@ func testAccCheckKubernetesStorageClassExists(n string, obj *api.StorageClass) r
 		if err != nil {
 			return err
 		}
+		ctx := context.TODO()
 
 		name := rs.Primary.ID
-		out, err := conn.StorageV1().StorageClasses().Get(name, meta_v1.GetOptions{})
+		out, err := conn.StorageV1().StorageClasses().Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
@@ -242,9 +314,8 @@ func testAccCheckKubernetesStorageClassExists(n string, obj *api.StorageClass) r
 	}
 }
 
-func testAccKubernetesStorageClassConfig_basic(name string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_storage_class" "test" {
+func testAccKubernetesStorageClassConfig_basic(name, provisioner string) string {
+	return fmt.Sprintf(`resource "kubernetes_storage_class" "test" {
   metadata {
     annotations = {
       TestAnnotationOne = "one"
@@ -260,23 +331,22 @@ resource "kubernetes_storage_class" "test" {
     name = "%s"
   }
 
-  storage_provisioner    = "kubernetes.io/gce-pd"
+  storage_provisioner    = "%s"
   reclaim_policy         = "Delete"
   volume_binding_mode    = "Immediate"
   allow_volume_expansion = true
 
-  mount_options			 = ["foo", "bar"]
+  mount_options = ["foo", "bar"]
 
   parameters = {
     type = "pd-ssd"
   }
 }
-`, name)
+`, name, provisioner)
 }
 
-func testAccKubernetesStorageClassConfig_modified(name string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_storage_class" "test" {
+func testAccKubernetesStorageClassConfig_modified(name, provisioner string) string {
+	return fmt.Sprintf(`resource "kubernetes_storage_class" "test" {
   metadata {
     annotations = {
       TestAnnotationOne = "one"
@@ -291,41 +361,61 @@ resource "kubernetes_storage_class" "test" {
     name = "%s"
   }
 
-  storage_provisioner    = "kubernetes.io/gce-pd"
+  storage_provisioner    = "%s"
   reclaim_policy         = "Retain"
   volume_binding_mode    = "WaitForFirstConsumer"
   allow_volume_expansion = false
 
-  mount_options			 = ["foo"]
+  mount_options = ["foo"]
 
   parameters = {
     type  = "pd-standard"
     zones = "us-west1-a,us-west1-b"
   }
+
+
 }
-`, name)
+`, name, provisioner)
 }
 
-func testAccKubernetesStorageClassConfig_noParameters(name string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_storage_class" "test" {
+func testAccKubernetesStorageClassConfig_noParameters(name, provisioner string) string {
+	return fmt.Sprintf(`resource "kubernetes_storage_class" "test" {
   metadata {
     name = "%s"
   }
 
-  storage_provisioner = "kubernetes.io/gce-pd"
+  storage_provisioner = "%s"
 }
-`, name)
+`, name, provisioner)
 }
 
-func testAccKubernetesStorageClassConfig_generatedName(prefix string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_storage_class" "test" {
+func testAccKubernetesStorageClassConfig_generatedName(prefix, provisioner string) string {
+	return fmt.Sprintf(`resource "kubernetes_storage_class" "test" {
   metadata {
     generate_name = "%s"
   }
 
-  storage_provisioner = "kubernetes.io/gce-pd"
+  storage_provisioner = "%s"
 }
-`, prefix)
+`, prefix, provisioner)
+}
+
+func testAccKubernetesStorageClassConfig_allowedTopologies(name, provisioner string) string {
+	return fmt.Sprintf(`resource "kubernetes_storage_class" "test" {
+  metadata {
+    name = "%s"
+  }
+
+  storage_provisioner = "%s"
+  allowed_topologies {
+    match_label_expressions {
+    key = "failure-domain.beta.kubernetes.io/zone"
+    values = [
+      "us-west1-a",
+      "us-west1-b"
+    ]
+  }
+ }
+}
+`, name, provisioner)
 }

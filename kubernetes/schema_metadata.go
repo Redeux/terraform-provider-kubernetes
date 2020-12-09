@@ -3,7 +3,7 @@ package kubernetes
 import (
 	"fmt"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
 func metadataFields(objectName string) map[string]*schema.Schema {
@@ -77,6 +77,11 @@ func metadataSchema(objectName string, generatableName bool) *schema.Schema {
 			Schema: fields,
 		},
 	}
+}
+
+func metadataSchemaForceNew(s *schema.Schema) *schema.Schema {
+	s.ForceNew = true
+	return s
 }
 
 func namespacedMetadataSchema(objectName string, generatableName bool) *schema.Schema {

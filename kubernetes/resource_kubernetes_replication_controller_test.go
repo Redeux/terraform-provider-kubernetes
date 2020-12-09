@@ -1,72 +1,81 @@
 package kubernetes
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/acctest"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	api "k8s.io/api/core/v1"
-	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestAccKubernetesReplicationController_basic(t *testing.T) {
 	var conf api.ReplicationController
 	name := fmt.Sprintf("tf-acc-test-%s", acctest.RandStringFromCharSet(10, acctest.CharSetAlphaNum))
+	resourceName := "kubernetes_replication_controller.test"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:      func() { testAccPreCheck(t) },
-		IDRefreshName: "kubernetes_replication_controller.test",
-		Providers:     testAccProviders,
-		CheckDestroy:  testAccCheckKubernetesReplicationControllerDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		IDRefreshName:     resourceName,
+		IDRefreshIgnore:   []string{"metadata.0.resource_version"},
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccCheckKubernetesReplicationControllerDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccKubernetesReplicationControllerConfig_basic(name),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					testAccCheckKubernetesReplicationControllerExists("kubernetes_replication_controller.test", &conf),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "metadata.0.annotations.%", "2"),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "metadata.0.annotations.TestAnnotationOne", "one"),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "metadata.0.annotations.TestAnnotationTwo", "two"),
-					testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{"TestAnnotationOne": "one", "TestAnnotationTwo": "two"}),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "metadata.0.labels.%", "3"),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "metadata.0.labels.TestLabelOne", "one"),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "metadata.0.labels.TestLabelTwo", "two"),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "metadata.0.labels.TestLabelThree", "three"),
-					testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{"TestLabelOne": "one", "TestLabelTwo": "two", "TestLabelThree": "three"}),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "metadata.0.name", name),
-					resource.TestCheckResourceAttrSet("kubernetes_replication_controller.test", "metadata.0.generation"),
-					resource.TestCheckResourceAttrSet("kubernetes_replication_controller.test", "metadata.0.resource_version"),
-					resource.TestCheckResourceAttrSet("kubernetes_replication_controller.test", "metadata.0.self_link"),
-					resource.TestCheckResourceAttrSet("kubernetes_replication_controller.test", "metadata.0.uid"),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.container.0.image", "nginx:1.7.8"),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.container.0.name", "tf-acc-test"),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.metadata.0.annotations.%", "1"),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.metadata.0.annotations.TestAnnotationFive", "five"),
+					testAccCheckKubernetesReplicationControllerExists(resourceName, &conf),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.annotations.%", "2"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.annotations.TestAnnotationOne", "one"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.annotations.TestAnnotationTwo", "two"),
+					//testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{"TestAnnotationOne": "one", "TestAnnotationTwo": "two"}),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.labels.%", "3"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.labels.TestLabelOne", "one"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.labels.TestLabelTwo", "two"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.labels.TestLabelThree", "three"),
+					//testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{"TestLabelOne": "one", "TestLabelTwo": "two", "TestLabelThree": "three"}),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.name", name),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.generation"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.resource_version"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.self_link"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.uid"),
+					resource.TestCheckResourceAttr(resourceName, "spec.0.template.0.spec.0.container.0.image", "nginx:1.7.8"),
+					resource.TestCheckResourceAttr(resourceName, "spec.0.template.0.spec.0.container.0.name", "tf-acc-test"),
+					resource.TestCheckResourceAttr(resourceName, "spec.0.template.0.metadata.0.annotations.%", "1"),
+					resource.TestCheckResourceAttr(resourceName, "spec.0.template.0.metadata.0.annotations.TestAnnotationFive", "five"),
 				),
+			},
+			{
+				ResourceName:            resourceName,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"metadata.0.resource_version"},
 			},
 			{
 				Config: testAccKubernetesReplicationControllerConfig_modified(name),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					testAccCheckKubernetesReplicationControllerExists("kubernetes_replication_controller.test", &conf),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "metadata.0.annotations.%", "2"),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "metadata.0.annotations.TestAnnotationOne", "one"),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "metadata.0.annotations.Different", "1234"),
-					testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{"TestAnnotationOne": "one", "Different": "1234"}),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "metadata.0.labels.%", "2"),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "metadata.0.labels.TestLabelOne", "one"),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "metadata.0.labels.TestLabelThree", "three"),
-					testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{"TestLabelOne": "one", "TestLabelThree": "three"}),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "metadata.0.name", name),
-					resource.TestCheckResourceAttrSet("kubernetes_replication_controller.test", "metadata.0.generation"),
-					resource.TestCheckResourceAttrSet("kubernetes_replication_controller.test", "metadata.0.resource_version"),
-					resource.TestCheckResourceAttrSet("kubernetes_replication_controller.test", "metadata.0.self_link"),
-					resource.TestCheckResourceAttrSet("kubernetes_replication_controller.test", "metadata.0.uid"),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.container.0.image", "nginx:1.7.9"),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.container.0.name", "tf-acc-test"),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.metadata.0.annotations.%", "1"),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.metadata.0.annotations.TestAnnotationSix", "six"),
+					testAccCheckKubernetesReplicationControllerExists(resourceName, &conf),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.annotations.%", "2"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.annotations.TestAnnotationOne", "one"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.annotations.Different", "1234"),
+					//testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{"TestAnnotationOne": "one", "Different": "1234"}),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.labels.%", "2"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.labels.TestLabelOne", "one"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.labels.TestLabelThree", "three"),
+					//testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{"TestLabelOne": "one", "TestLabelThree": "three"}),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.name", name),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.generation"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.resource_version"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.self_link"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.uid"),
+					resource.TestCheckResourceAttr(resourceName, "spec.0.template.0.spec.0.container.0.image", "nginx:1.7.9"),
+					resource.TestCheckResourceAttr(resourceName, "spec.0.template.0.spec.0.container.0.name", "tf-acc-test"),
+					resource.TestCheckResourceAttr(resourceName, "spec.0.template.0.metadata.0.annotations.%", "1"),
+					resource.TestCheckResourceAttr(resourceName, "spec.0.template.0.metadata.0.annotations.TestAnnotationSix", "six"),
 				),
 			},
 		},
@@ -78,10 +87,10 @@ func TestAccKubernetesReplicationController_initContainer(t *testing.T) {
 	name := fmt.Sprintf("tf-acc-test-%s", acctest.RandStringFromCharSet(10, acctest.CharSetAlphaNum))
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:      func() { testAccPreCheck(t) },
-		IDRefreshName: "kubernetes_replication_controller.test",
-		Providers:     testAccProviders,
-		CheckDestroy:  testAccCheckKubernetesReplicationControllerDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		IDRefreshName:     "kubernetes_replication_controller.test",
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccCheckKubernetesReplicationControllerDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccKubernetesReplicationControllerConfig_initContainer(name),
@@ -107,30 +116,77 @@ func TestAccKubernetesReplicationController_initContainer(t *testing.T) {
 					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.0.option.0.value", "1"),
 					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.0.option.1.name", "use-vc"),
 					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.0.option.1.value", ""),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_policy", "Default"),
+					//          resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_policy", "Default"),
 				),
 			},
 		},
 	})
 }
 
-func TestAccKubernetesReplicationController_importBasic(t *testing.T) {
-	resourceName := "kubernetes_replication_controller.test"
+func TestAccKubernetesReplicationController_regression(t *testing.T) {
+	var conf1, conf2 api.ReplicationController
 	name := fmt.Sprintf("tf-acc-test-%s", acctest.RandStringFromCharSet(10, acctest.CharSetAlphaNum))
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckKubernetesReplicationControllerDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		IDRefreshName:     "kubernetes_replication_controller.test",
+		ExternalProviders: testAccExternalProviders,
+		CheckDestroy:      testAccCheckKubernetesReplicationControllerDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccKubernetesReplicationControllerConfig_basic(name),
+				Config: requiredProviders() + testAccKubernetesReplicationControllerConfig_regression("kubernetes-released", name),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckKubernetesReplicationControllerExists("kubernetes_replication_controller.test", &conf1),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.init_container.0.image", "busybox"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.init_container.0.name", "install"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.init_container.0.command.0", "wget"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.init_container.0.command.1", "-O"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.init_container.0.command.2", "/work-dir/index.html"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.init_container.0.command.3", "http://kubernetes.io"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.init_container.0.volume_mount.0.name", "workdir"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.init_container.0.volume_mount.0.mount_path", "/work-dir"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.#", "1"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.0.nameservers.#", "3"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.0.nameservers.0", "1.1.1.1"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.0.nameservers.1", "8.8.8.8"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.0.nameservers.2", "9.9.9.9"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.0.searches.#", "1"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.0.searches.0", "kubernetes.io"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.0.option.#", "2"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.0.option.0.name", "ndots"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.0.option.0.value", "1"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.0.option.1.name", "use-vc"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.0.option.1.value", ""),
+					//resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_policy", "Default"),
+				),
 			},
 			{
-				ResourceName:            resourceName,
-				ImportState:             true,
-				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"metadata.0.resource_version"},
+				Config: requiredProviders() + testAccKubernetesReplicationControllerConfig_regression("kubernetes-local", name),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckKubernetesReplicationControllerExists("kubernetes_replication_controller.test", &conf2),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.init_container.0.image", "busybox"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.init_container.0.name", "install"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.init_container.0.command.0", "wget"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.init_container.0.command.1", "-O"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.init_container.0.command.2", "/work-dir/index.html"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.init_container.0.command.3", "http://kubernetes.io"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.init_container.0.volume_mount.0.name", "workdir"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.init_container.0.volume_mount.0.mount_path", "/work-dir"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.#", "1"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.0.nameservers.#", "3"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.0.nameservers.0", "1.1.1.1"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.0.nameservers.1", "8.8.8.8"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.0.nameservers.2", "9.9.9.9"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.0.searches.#", "1"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.0.searches.0", "kubernetes.io"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.0.option.#", "2"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.0.option.0.name", "ndots"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.0.option.0.value", "1"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.0.option.1.name", "use-vc"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_config.0.option.1.value", ""),
+					//resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.dns_policy", "Default"),
+					testAccCheckKubernetesReplicationControllerForceNew(&conf1, &conf2, false),
+				),
 			},
 		},
 	})
@@ -139,44 +195,29 @@ func TestAccKubernetesReplicationController_importBasic(t *testing.T) {
 func TestAccKubernetesReplicationController_generatedName(t *testing.T) {
 	var conf api.ReplicationController
 	prefix := "tf-acc-test-gen-"
+	resourceName := "kubernetes_replication_controller.test"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:      func() { testAccPreCheck(t) },
-		IDRefreshName: "kubernetes_replication_controller.test",
-		Providers:     testAccProviders,
-		CheckDestroy:  testAccCheckKubernetesReplicationControllerDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		IDRefreshName:     resourceName,
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccCheckKubernetesReplicationControllerDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccKubernetesReplicationControllerConfig_generatedName(prefix),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					testAccCheckKubernetesReplicationControllerExists("kubernetes_replication_controller.test", &conf),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "metadata.0.annotations.%", "0"),
-					testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{}),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "metadata.0.labels.%", "3"),
-					testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{"TestLabelOne": "one", "TestLabelTwo": "two", "TestLabelThree": "three"}),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "metadata.0.generate_name", prefix),
-					resource.TestMatchResourceAttr("kubernetes_replication_controller.test", "metadata.0.name", regexp.MustCompile("^"+prefix)),
-					resource.TestCheckResourceAttrSet("kubernetes_replication_controller.test", "metadata.0.generation"),
-					resource.TestCheckResourceAttrSet("kubernetes_replication_controller.test", "metadata.0.resource_version"),
-					resource.TestCheckResourceAttrSet("kubernetes_replication_controller.test", "metadata.0.self_link"),
-					resource.TestCheckResourceAttrSet("kubernetes_replication_controller.test", "metadata.0.uid"),
+					testAccCheckKubernetesReplicationControllerExists(resourceName, &conf),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.annotations.%", "0"),
+					//testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{}),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.labels.%", "3"),
+					//testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{"TestLabelOne": "one", "TestLabelTwo": "two", "TestLabelThree": "three"}),
+					resource.TestCheckResourceAttr(resourceName, "metadata.0.generate_name", prefix),
+					resource.TestMatchResourceAttr(resourceName, "metadata.0.name", regexp.MustCompile("^"+prefix)),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.generation"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.resource_version"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.self_link"),
+					resource.TestCheckResourceAttrSet(resourceName, "metadata.0.uid"),
 				),
-			},
-		},
-	})
-}
-
-func TestAccKubernetesReplicationController_importGeneratedName(t *testing.T) {
-	resourceName := "kubernetes_replication_controller.test"
-	prefix := "tf-acc-test-gen-import-"
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckKubernetesReplicationControllerDestroy,
-		Steps: []resource.TestStep{
-			{
-				Config: testAccKubernetesReplicationControllerConfig_generatedName(prefix),
 			},
 			{
 				ResourceName:            resourceName,
@@ -195,9 +236,9 @@ func TestAccKubernetesReplicationController_with_security_context(t *testing.T) 
 	imageName := "nginx:1.7.9"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckKubernetesReplicationControllerDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccCheckKubernetesReplicationControllerDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccKubernetesReplicationControllerConfigWithSecurityContext(rcName, imageName),
@@ -207,7 +248,7 @@ func TestAccKubernetesReplicationController_with_security_context(t *testing.T) 
 					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.security_context.0.run_as_non_root", "true"),
 					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.security_context.0.run_as_user", "101"),
 					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.security_context.0.supplemental_groups.#", "1"),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.security_context.0.supplemental_groups.988695518", "101"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.security_context.0.supplemental_groups.0", "101"),
 				),
 			},
 		},
@@ -221,9 +262,9 @@ func TestAccKubernetesReplicationController_with_security_context_run_as_group(t
 	imageName := "nginx:1.7.9"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t); skipIfUnsupportedSecurityContextRunAsGroup(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckKubernetesReplicationControllerDestroy,
+		PreCheck:          func() { testAccPreCheck(t); skipIfUnsupportedSecurityContextRunAsGroup(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccCheckKubernetesReplicationControllerDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccKubernetesReplicationControllerConfigWithSecurityContextRunAsGroup(rcName, imageName),
@@ -234,7 +275,7 @@ func TestAccKubernetesReplicationController_with_security_context_run_as_group(t
 					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.security_context.0.run_as_non_root", "true"),
 					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.security_context.0.run_as_user", "101"),
 					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.security_context.0.supplemental_groups.#", "1"),
-					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.security_context.0.supplemental_groups.988695518", "101"),
+					resource.TestCheckResourceAttr("kubernetes_replication_controller.test", "spec.0.template.0.spec.0.security_context.0.supplemental_groups.0", "101"),
 				),
 			},
 		},
@@ -248,9 +289,9 @@ func TestAccKubernetesReplicationController_with_container_liveness_probe_using_
 	imageName := "gcr.io/google_containers/busybox"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckKubernetesReplicationControllerDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccCheckKubernetesReplicationControllerDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccKubernetesReplicationControllerConfigWithLivenessProbeUsingExec(rcName, imageName),
@@ -277,9 +318,9 @@ func TestAccKubernetesReplicationController_with_container_liveness_probe_using_
 	imageName := "gcr.io/google_containers/liveness"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckKubernetesReplicationControllerDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccCheckKubernetesReplicationControllerDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccKubernetesReplicationControllerConfigWithLivenessProbeUsingHTTPGet(rcName, imageName),
@@ -307,9 +348,9 @@ func TestAccKubernetesReplicationController_with_container_liveness_probe_using_
 	imageName := "gcr.io/google_containers/liveness"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckKubernetesReplicationControllerDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccCheckKubernetesReplicationControllerDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccKubernetesReplicationControllerConfigWithLivenessProbeUsingTCP(rcName, imageName),
@@ -332,9 +373,9 @@ func TestAccKubernetesReplicationController_with_container_lifecycle(t *testing.
 	imageName := "gcr.io/google_containers/liveness"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckKubernetesReplicationControllerDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccCheckKubernetesReplicationControllerDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccKubernetesReplicationControllerConfigWithLifeCycle(rcName, imageName),
@@ -363,9 +404,9 @@ func TestAccKubernetesReplicationController_with_container_security_context(t *t
 	imageName := "nginx:1.7.9"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckKubernetesReplicationControllerDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccCheckKubernetesReplicationControllerDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccKubernetesReplicationControllerConfigWithContainerSecurityContext(rcName, imageName),
@@ -387,9 +428,9 @@ func TestAccKubernetesReplicationController_with_volume_mount(t *testing.T) {
 	imageName := "nginx:1.7.9"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckKubernetesReplicationControllerDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccCheckKubernetesReplicationControllerDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccKubernetesReplicationControllerConfigWithVolumeMounts(secretName, rcName, imageName),
@@ -415,9 +456,9 @@ func TestAccKubernetesReplicationController_with_resource_requirements(t *testin
 	imageName := "nginx:1.7.9"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckKubernetesReplicationControllerDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccCheckKubernetesReplicationControllerDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccKubernetesReplicationControllerConfigWithResourceRequirements(rcName, imageName),
@@ -441,9 +482,9 @@ func TestAccKubernetesReplicationController_with_empty_dir_volume(t *testing.T) 
 	imageName := "nginx:1.7.9"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckKubernetesReplicationControllerDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccCheckKubernetesReplicationControllerDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccKubernetesReplicationControllerConfigWithEmptyDirVolumes(rcName, imageName),
@@ -462,9 +503,11 @@ func TestAccKubernetesReplicationController_with_empty_dir_volume(t *testing.T) 
 
 func testAccCheckKubernetesReplicationControllerDestroy(s *terraform.State) error {
 	conn, err := testAccProvider.Meta().(KubeClientsets).MainClientset()
+
 	if err != nil {
 		return err
 	}
+	ctx := context.TODO()
 
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "kubernetes_replication_controller" {
@@ -476,7 +519,7 @@ func testAccCheckKubernetesReplicationControllerDestroy(s *terraform.State) erro
 			return err
 		}
 
-		resp, err := conn.CoreV1().ReplicationControllers(namespace).Get(name, meta_v1.GetOptions{})
+		resp, err := conn.CoreV1().ReplicationControllers(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err == nil {
 			if resp.Name == rs.Primary.ID {
 				return fmt.Errorf("Replication Controller still exists: %s", rs.Primary.ID)
@@ -498,13 +541,14 @@ func testAccCheckKubernetesReplicationControllerExists(n string, obj *api.Replic
 		if err != nil {
 			return err
 		}
+		ctx := context.TODO()
 
 		namespace, name, err := idParts(rs.Primary.ID)
 		if err != nil {
 			return err
 		}
 
-		out, err := conn.CoreV1().ReplicationControllers(namespace).Get(name, meta_v1.GetOptions{})
+		out, err := conn.CoreV1().ReplicationControllers(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
@@ -514,9 +558,23 @@ func testAccCheckKubernetesReplicationControllerExists(n string, obj *api.Replic
 	}
 }
 
+func testAccCheckKubernetesReplicationControllerForceNew(old, new *api.ReplicationController, wantNew bool) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		if wantNew {
+			if old.ObjectMeta.UID == new.ObjectMeta.UID {
+				return fmt.Errorf("Expecting new resource for ReplicationController %s", old.ObjectMeta.UID)
+			}
+		} else {
+			if old.ObjectMeta.UID != new.ObjectMeta.UID {
+				return fmt.Errorf("Expecting ReplicationController UIDs to be the same: expected %s got %s", old.ObjectMeta.UID, new.ObjectMeta.UID)
+			}
+		}
+		return nil
+	}
+}
+
 func testAccKubernetesReplicationControllerConfig_basic(name string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_replication_controller" "test" {
+	return fmt.Sprintf(`resource "kubernetes_replication_controller" "test" {
   metadata {
     annotations = {
       TestAnnotationOne = "one"
@@ -533,7 +591,7 @@ resource "kubernetes_replication_controller" "test" {
   }
 
   spec {
-    replicas = 1000 # This is intentionally high to exercise the waiter
+    replicas = 500 # This is intentionally high to exercise the waiter
 
     selector = {
       TestLabelOne   = "one"
@@ -567,8 +625,7 @@ resource "kubernetes_replication_controller" "test" {
 }
 
 func testAccKubernetesReplicationControllerConfig_initContainer(name string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_replication_controller" "test" {
+	return fmt.Sprintf(`resource "kubernetes_replication_controller" "test" {
   metadata {
     annotations = {
       TestAnnotationOne = "one"
@@ -585,8 +642,7 @@ resource "kubernetes_replication_controller" "test" {
   }
 
   spec {
-    replicas = 1000 # This is intentionally high to exercise the waiter
-
+    replicas = 500 # This is intentionally high to exercise the waiter
     selector = {
       TestLabelOne   = "one"
       TestLabelTwo   = "two"
@@ -645,7 +701,7 @@ resource "kubernetes_replication_controller" "test" {
         dns_policy = "Default"
 
         volume {
-          name      = "workdir"
+          name = "workdir"
           empty_dir {}
         }
       }
@@ -656,8 +712,7 @@ resource "kubernetes_replication_controller" "test" {
 }
 
 func testAccKubernetesReplicationControllerConfig_modified(name string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_replication_controller" "test" {
+	return fmt.Sprintf(`resource "kubernetes_replication_controller" "test" {
   metadata {
     annotations = {
       TestAnnotationOne = "one"
@@ -705,8 +760,7 @@ resource "kubernetes_replication_controller" "test" {
 }
 
 func testAccKubernetesReplicationControllerConfig_generatedName(prefix string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_replication_controller" "test" {
+	return fmt.Sprintf(`resource "kubernetes_replication_controller" "test" {
   metadata {
     labels = {
       TestLabelOne   = "one"
@@ -746,8 +800,7 @@ resource "kubernetes_replication_controller" "test" {
 }
 
 func testAccKubernetesReplicationControllerConfigWithSecurityContext(rcName, imageName string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_replication_controller" "test" {
+	return fmt.Sprintf(`resource "kubernetes_replication_controller" "test" {
   metadata {
     name = "%s"
 
@@ -788,8 +841,7 @@ resource "kubernetes_replication_controller" "test" {
 }
 
 func testAccKubernetesReplicationControllerConfigWithSecurityContextRunAsGroup(rcName, imageName string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_replication_controller" "test" {
+	return fmt.Sprintf(`resource "kubernetes_replication_controller" "test" {
   metadata {
     name = "%s"
 
@@ -831,8 +883,7 @@ resource "kubernetes_replication_controller" "test" {
 }
 
 func testAccKubernetesReplicationControllerConfigWithLivenessProbeUsingExec(rcName, imageName string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_replication_controller" "test" {
+	return fmt.Sprintf(`resource "kubernetes_replication_controller" "test" {
   metadata {
     name = "%s"
 
@@ -876,8 +927,7 @@ resource "kubernetes_replication_controller" "test" {
 }
 
 func testAccKubernetesReplicationControllerConfigWithLivenessProbeUsingHTTPGet(rcName, imageName string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_replication_controller" "test" {
+	return fmt.Sprintf(`resource "kubernetes_replication_controller" "test" {
   metadata {
     name = "%s"
 
@@ -927,8 +977,7 @@ resource "kubernetes_replication_controller" "test" {
 }
 
 func testAccKubernetesReplicationControllerConfigWithLivenessProbeUsingTCP(rcName, imageName string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_replication_controller" "test" {
+	return fmt.Sprintf(`resource "kubernetes_replication_controller" "test" {
   metadata {
     name = "%s"
 
@@ -972,8 +1021,7 @@ resource "kubernetes_replication_controller" "test" {
 }
 
 func testAccKubernetesReplicationControllerConfigWithLifeCycle(rcName, imageName string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_replication_controller" "test" {
+	return fmt.Sprintf(`resource "kubernetes_replication_controller" "test" {
   metadata {
     name = "%s"
 
@@ -1022,8 +1070,7 @@ resource "kubernetes_replication_controller" "test" {
 }
 
 func testAccKubernetesReplicationControllerConfigWithContainerSecurityContext(rcName, imageName string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_replication_controller" "test" {
+	return fmt.Sprintf(`resource "kubernetes_replication_controller" "test" {
   metadata {
     name = "%s"
 
@@ -1066,8 +1113,7 @@ resource "kubernetes_replication_controller" "test" {
 }
 
 func testAccKubernetesReplicationControllerConfigWithVolumeMounts(secretName, rcName, imageName string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_secret" "test" {
+	return fmt.Sprintf(`resource "kubernetes_secret" "test" {
   metadata {
     name = "%s"
   }
@@ -1124,8 +1170,7 @@ resource "kubernetes_replication_controller" "test" {
 }
 
 func testAccKubernetesReplicationControllerConfigWithResourceRequirements(rcName, imageName string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_replication_controller" "test" {
+	return fmt.Sprintf(`resource "kubernetes_replication_controller" "test" {
   metadata {
     name = "%s"
 
@@ -1152,12 +1197,12 @@ resource "kubernetes_replication_controller" "test" {
           name  = "containername"
 
           resources {
-            limits {
+            limits = {
               cpu    = "0.5"
               memory = "512Mi"
             }
 
-            requests {
+            requests = {
               cpu    = "250m"
               memory = "50Mi"
             }
@@ -1171,8 +1216,7 @@ resource "kubernetes_replication_controller" "test" {
 }
 
 func testAccKubernetesReplicationControllerConfigWithEmptyDirVolumes(rcName, imageName string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_replication_controller" "test" {
+	return fmt.Sprintf(`resource "kubernetes_replication_controller" "test" {
   metadata {
     name = "%s"
 
@@ -1216,4 +1260,91 @@ resource "kubernetes_replication_controller" "test" {
   }
 }
 `, rcName, imageName)
+}
+
+func testAccKubernetesReplicationControllerConfig_regression(provider, name string) string {
+	return fmt.Sprintf(`resource "kubernetes_replication_controller" "test" {
+  provider = "%s"
+  metadata {
+    annotations = {
+      TestAnnotationOne = "one"
+      TestAnnotationTwo = "two"
+    }
+
+    labels = {
+      TestLabelOne   = "one"
+      TestLabelTwo   = "two"
+      TestLabelThree = "three"
+    }
+
+    name = "%s"
+  }
+
+  spec {
+    replicas = 500 # This is intentionally high to exercise the waiter
+    selector = {
+      TestLabelOne   = "one"
+      TestLabelTwo   = "two"
+      TestLabelThree = "three"
+    }
+
+    template {
+      metadata {
+        labels = {
+          TestLabelOne   = "one"
+          TestLabelTwo   = "two"
+          TestLabelThree = "three"
+        }
+      }
+
+      spec {
+        container {
+          name  = "nginx"
+          image = "nginx"
+
+          port {
+            container_port = 80
+          }
+
+          volume_mount {
+            name       = "workdir"
+            mount_path = "/usr/share/nginx/html"
+          }
+        }
+
+        init_container {
+          name    = "install"
+          image   = "busybox"
+          command = ["wget", "-O", "/work-dir/index.html", "http://kubernetes.io"]
+
+          volume_mount {
+            name       = "workdir"
+            mount_path = "/work-dir"
+          }
+        }
+
+        dns_config {
+          nameservers = ["1.1.1.1", "8.8.8.8", "9.9.9.9"]
+          searches    = ["kubernetes.io"]
+
+          option {
+            name  = "ndots"
+            value = 1
+          }
+
+          option {
+            name = "use-vc"
+          }
+        }
+
+        volume {
+          name = "workdir"
+          empty_dir {}
+        }
+
+      }
+    }
+  }
+}
+`, provider, name)
 }

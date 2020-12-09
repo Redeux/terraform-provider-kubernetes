@@ -1,7 +1,7 @@
 package kubernetes
 
 import (
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"k8s.io/api/extensions/v1beta1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
@@ -10,29 +10,34 @@ import (
 
 func flattenIngressRule(in []v1beta1.IngressRule) []interface{} {
 	att := make([]interface{}, len(in), len(in))
-	for i, n := range in {
-		// rulePrefix := fmt.Sprintf("rule.%d.")
+	for i, r := range in {
 		m := make(map[string]interface{})
 
-		m["host"] = n.Host
-
-		httpAtt := make(map[string]interface{})
-		pathAtts := make([]interface{}, len(n.HTTP.Paths), len(n.HTTP.Paths))
-		for i, p := range n.HTTP.Paths {
-			path := map[string]interface{}{
-				"path":    p.Path,
-				"backend": flattenIngressBackend(&p.Backend),
-			}
-			pathAtts[i] = path
-		}
-		httpAtt["path"] = pathAtts
-		m["http"] = []interface{}{
-			httpAtt,
-		}
-
+		m["host"] = r.Host
+		m["http"] = flattenIngressRuleHttp(r.HTTP)
 		att[i] = m
 	}
 	return att
+}
+
+func flattenIngressRuleHttp(in *v1beta1.HTTPIngressRuleValue) []interface{} {
+	if in == nil {
+		return []interface{}{}
+	}
+	pathAtts := make([]interface{}, len(in.Paths), len(in.Paths))
+	for i, p := range in.Paths {
+		path := map[string]interface{}{
+			"path":    p.Path,
+			"backend": flattenIngressBackend(&p.Backend),
+		}
+		pathAtts[i] = path
+	}
+
+	httpAtt := map[string]interface{}{
+		"path": pathAtts,
+	}
+
+	return []interface{}{httpAtt}
 }
 
 func flattenIngressBackend(in *v1beta1.IngressBackend) []interface{} {
@@ -49,6 +54,10 @@ func flattenIngressBackend(in *v1beta1.IngressBackend) []interface{} {
 
 func flattenIngressSpec(in v1beta1.IngressSpec) []interface{} {
 	att := make(map[string]interface{})
+
+	if in.IngressClassName != nil {
+		att["ingress_class_name"] = in.IngressClassName
+	}
 
 	if in.Backend != nil {
 		att["backend"] = flattenIngressBackend(in.Backend)
@@ -128,6 +137,10 @@ func expandIngressSpec(l []interface{}) v1beta1.IngressSpec {
 	}
 	in := l[0].(map[string]interface{})
 	obj := v1beta1.IngressSpec{}
+
+	if v, ok := in["ingress_class_name"].(string); ok && len(v) > 0 {
+		obj.IngressClassName = &v
+	}
 
 	if v, ok := in["backend"].([]interface{}); ok && len(v) > 0 {
 		obj.Backend = expandIngressBackend(v)

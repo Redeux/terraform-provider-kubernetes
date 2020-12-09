@@ -1,13 +1,14 @@
 package kubernetes
 
 import (
-	"fmt"
+	"context"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"log"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	policy "k8s.io/api/policy/v1beta1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	pkgApi "k8s.io/apimachinery/pkg/types"
 )
 
@@ -61,13 +62,12 @@ var (
 
 func resourceKubernetesPodSecurityPolicy() *schema.Resource {
 	return &schema.Resource{
-		Create: resourceKubernetesPodSecurityPolicyCreate,
-		Read:   resourceKubernetesPodSecurityPolicyRead,
-		Exists: resourceKubernetesPodSecurityPolicyExists,
-		Update: resourceKubernetesPodSecurityPolicyUpdate,
-		Delete: resourceKubernetesPodSecurityPolicyDelete,
+		CreateContext: resourceKubernetesPodSecurityPolicyCreate,
+		ReadContext:   resourceKubernetesPodSecurityPolicyRead,
+		UpdateContext: resourceKubernetesPodSecurityPolicyUpdate,
+		DeleteContext: resourceKubernetesPodSecurityPolicyDelete,
 		Importer: &schema.ResourceImporter{
-			State: schema.ImportStatePassthrough,
+			StateContext: schema.ImportStatePassthroughContext,
 		},
 
 		Schema: map[string]*schema.Schema{
@@ -363,17 +363,17 @@ func resourceKubernetesPodSecurityPolicy() *schema.Resource {
 	}
 }
 
-func resourceKubernetesPodSecurityPolicyCreate(d *schema.ResourceData, meta interface{}) error {
+func resourceKubernetesPodSecurityPolicyCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	metadata := expandMetadata(d.Get("metadata").([]interface{}))
 	spec, err := expandPodSecurityPolicySpec(d.Get("spec").([]interface{}))
 
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	psp := &policy.PodSecurityPolicy{
@@ -382,52 +382,59 @@ func resourceKubernetesPodSecurityPolicyCreate(d *schema.ResourceData, meta inte
 	}
 
 	log.Printf("[INFO] Creating new PodSecurityPolicy: %#v", psp)
-	out, err := conn.PolicyV1beta1().PodSecurityPolicies().Create(psp)
+	out, err := conn.PolicyV1beta1().PodSecurityPolicies().Create(ctx, psp, metav1.CreateOptions{})
 
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 	log.Printf("[INFO] Submitted new PodSecurityPolicy: %#v", out)
 	d.SetId(out.Name)
 
-	return resourceKubernetesPodSecurityPolicyRead(d, meta)
+	return resourceKubernetesPodSecurityPolicyRead(ctx, d, meta)
 }
 
-func resourceKubernetesPodSecurityPolicyRead(d *schema.ResourceData, meta interface{}) error {
+func resourceKubernetesPodSecurityPolicyRead(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	exists, err := resourceKubernetesPodSecurityPolicyExists(ctx, d, meta)
+	if err != nil {
+		return diag.FromErr(err)
+	}
+	if !exists {
+		return diag.Diagnostics{}
+	}
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	name := d.Id()
 
 	log.Printf("[INFO] Reading PodSecurityPolicy %s", name)
-	psp, err := conn.PolicyV1beta1().PodSecurityPolicies().Get(name, meta_v1.GetOptions{})
+	psp, err := conn.PolicyV1beta1().PodSecurityPolicies().Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		log.Printf("[DEBUG] Received error: %#v", err)
-		return err
+		return diag.FromErr(err)
 	}
 
 	log.Printf("[INFO] Received PodSecurityPolicy: %#v", psp)
 	err = d.Set("metadata", flattenMetadata(psp.ObjectMeta, d))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	flattenedSpec := flattenPodSecurityPolicySpec(psp.Spec)
 	log.Printf("[DEBUG] Flattened PodSecurityPolicy roleRef: %#v", flattenedSpec)
 	err = d.Set("spec", flattenedSpec)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	return nil
 }
 
-func resourceKubernetesPodSecurityPolicyUpdate(d *schema.ResourceData, meta interface{}) error {
+func resourceKubernetesPodSecurityPolicyUpdate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	name := d.Id()
@@ -437,44 +444,44 @@ func resourceKubernetesPodSecurityPolicyUpdate(d *schema.ResourceData, meta inte
 	if d.HasChange("spec") {
 		diffOps, err := patchPodSecurityPolicySpec("spec.0.", "/spec", d)
 		if err != nil {
-			return err
+			return diag.FromErr(err)
 		}
 		ops = append(ops, *diffOps...)
 	}
 	data, err := ops.MarshalJSON()
 	if err != nil {
-		return fmt.Errorf("Failed to marshal update operations: %s", err)
+		return diag.Errorf("Failed to marshal update operations: %s", err)
 	}
 	log.Printf("[INFO] Updating PodSecurityPolicy %q: %v", name, string(data))
-	out, err := conn.PolicyV1beta1().PodSecurityPolicies().Patch(name, pkgApi.JSONPatchType, data)
+	out, err := conn.PolicyV1beta1().PodSecurityPolicies().Patch(ctx, name, pkgApi.JSONPatchType, data, metav1.PatchOptions{})
 	if err != nil {
-		return fmt.Errorf("Failed to update PodSecurityPolicy: %s", err)
+		return diag.Errorf("Failed to update PodSecurityPolicy: %s", err)
 	}
 	log.Printf("[INFO] Submitted updated PodSecurityPolicy: %#v", out)
 	d.SetId(out.Name)
 
-	return resourceKubernetesPodSecurityPolicyRead(d, meta)
+	return resourceKubernetesPodSecurityPolicyRead(ctx, d, meta)
 }
 
-func resourceKubernetesPodSecurityPolicyDelete(d *schema.ResourceData, meta interface{}) error {
+func resourceKubernetesPodSecurityPolicyDelete(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	name := d.Id()
 
 	log.Printf("[INFO] Deleting PodSecurityPolicy: %#v", name)
-	err = conn.PolicyV1beta1().PodSecurityPolicies().Delete(name, &meta_v1.DeleteOptions{})
+	err = conn.PolicyV1beta1().PodSecurityPolicies().Delete(ctx, name, metav1.DeleteOptions{})
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 	log.Printf("[INFO] PodSecurityPolicy %s deleted", name)
 
 	return nil
 }
 
-func resourceKubernetesPodSecurityPolicyExists(d *schema.ResourceData, meta interface{}) (bool, error) {
+func resourceKubernetesPodSecurityPolicyExists(ctx context.Context, d *schema.ResourceData, meta interface{}) (bool, error) {
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
 		return false, err
@@ -483,7 +490,7 @@ func resourceKubernetesPodSecurityPolicyExists(d *schema.ResourceData, meta inte
 	name := d.Id()
 
 	log.Printf("[INFO] Checking PodSecurityPolicy %s", name)
-	_, err = conn.PolicyV1beta1().PodSecurityPolicies().Get(name, meta_v1.GetOptions{})
+	_, err = conn.PolicyV1beta1().PodSecurityPolicies().Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		if statusErr, ok := err.(*errors.StatusError); ok && statusErr.ErrStatus.Code == 404 {
 			return false, nil

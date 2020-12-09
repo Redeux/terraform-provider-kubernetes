@@ -1,13 +1,14 @@
 package kubernetes
 
 import (
-	"fmt"
+	"context"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"log"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	api "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	pkgApi "k8s.io/apimachinery/pkg/types"
 )
 
@@ -33,13 +34,12 @@ var (
 
 func resourceKubernetesNetworkPolicy() *schema.Resource {
 	return &schema.Resource{
-		Create: resourceKubernetesNetworkPolicyCreate,
-		Read:   resourceKubernetesNetworkPolicyRead,
-		Exists: resourceKubernetesNetworkPolicyExists,
-		Update: resourceKubernetesNetworkPolicyUpdate,
-		Delete: resourceKubernetesNetworkPolicyDelete,
+		CreateContext: resourceKubernetesNetworkPolicyCreate,
+		ReadContext:   resourceKubernetesNetworkPolicyRead,
+		UpdateContext: resourceKubernetesNetworkPolicyUpdate,
+		DeleteContext: resourceKubernetesNetworkPolicyDelete,
 		Importer: &schema.ResourceImporter{
-			State: schema.ImportStatePassthrough,
+			StateContext: schema.ImportStatePassthroughContext,
 		},
 
 		Schema: map[string]*schema.Schema{
@@ -234,16 +234,16 @@ func resourceKubernetesNetworkPolicy() *schema.Resource {
 	}
 }
 
-func resourceKubernetesNetworkPolicyCreate(d *schema.ResourceData, meta interface{}) error {
+func resourceKubernetesNetworkPolicyCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	metadata := expandMetadata(d.Get("metadata").([]interface{}))
 	spec, err := expandNetworkPolicySpec(d.Get("spec").([]interface{}))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	svc := api.NetworkPolicy{
@@ -251,97 +251,104 @@ func resourceKubernetesNetworkPolicyCreate(d *schema.ResourceData, meta interfac
 		Spec:       *spec,
 	}
 	log.Printf("[INFO] Creating new network policy: %#v", svc)
-	out, err := conn.NetworkingV1().NetworkPolicies(metadata.Namespace).Create(&svc)
+	out, err := conn.NetworkingV1().NetworkPolicies(metadata.Namespace).Create(ctx, &svc, metav1.CreateOptions{})
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	log.Printf("[INFO] Submitted new network policy: %#v", out)
 	d.SetId(buildId(out.ObjectMeta))
 
-	return resourceKubernetesNetworkPolicyRead(d, meta)
+	return resourceKubernetesNetworkPolicyRead(ctx, d, meta)
 }
 
-func resourceKubernetesNetworkPolicyRead(d *schema.ResourceData, meta interface{}) error {
+func resourceKubernetesNetworkPolicyRead(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	exists, err := resourceKubernetesNetworkPolicyExists(ctx, d, meta)
+	if err != nil {
+		return diag.FromErr(err)
+	}
+	if !exists {
+		return diag.Diagnostics{}
+	}
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	namespace, name, err := idParts(d.Id())
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 	log.Printf("[INFO] Reading network policy %s", name)
-	svc, err := conn.NetworkingV1().NetworkPolicies(namespace).Get(name, meta_v1.GetOptions{})
+	svc, err := conn.NetworkingV1().NetworkPolicies(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		log.Printf("[DEBUG] Received error: %#v", err)
-		return err
+		return diag.FromErr(err)
 	}
 	log.Printf("[INFO] Received network policy: %#v", svc)
 	err = d.Set("metadata", flattenMetadata(svc.ObjectMeta, d))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	flattened := flattenNetworkPolicySpec(svc.Spec)
 	log.Printf("[DEBUG] Flattened network policy spec: %#v", flattened)
 	err = d.Set("spec", flattened)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	return nil
 }
 
-func resourceKubernetesNetworkPolicyUpdate(d *schema.ResourceData, meta interface{}) error {
+func resourceKubernetesNetworkPolicyUpdate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	namespace, name, err := idParts(d.Id())
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	ops := patchMetadata("metadata.0.", "/metadata/", d)
 	if d.HasChange("spec") {
 		diffOps, err := patchNetworkPolicySpec("spec.0.", "/spec", d)
 		if err != nil {
-			return err
+			return diag.FromErr(err)
 		}
 		ops = append(ops, *diffOps...)
 	}
 	data, err := ops.MarshalJSON()
 	if err != nil {
-		return fmt.Errorf("Failed to marshal update operations: %s", err)
+		return diag.Errorf("Failed to marshal update operations: %s", err)
 	}
 	log.Printf("[INFO] Updating network policy %q: %v", name, string(data))
-	out, err := conn.NetworkingV1().NetworkPolicies(namespace).Patch(name, pkgApi.JSONPatchType, data)
+	out, err := conn.NetworkingV1().NetworkPolicies(namespace).Patch(ctx, name, pkgApi.JSONPatchType, data, metav1.PatchOptions{})
 	if err != nil {
-		return fmt.Errorf("Failed to update network policy: %s", err)
+		return diag.Errorf("Failed to update network policy: %s", err)
 	}
 	log.Printf("[INFO] Submitted updated network policy: %#v", out)
 	d.SetId(buildId(out.ObjectMeta))
 
-	return resourceKubernetesNetworkPolicyRead(d, meta)
+	return resourceKubernetesNetworkPolicyRead(ctx, d, meta)
 }
 
-func resourceKubernetesNetworkPolicyDelete(d *schema.ResourceData, meta interface{}) error {
+func resourceKubernetesNetworkPolicyDelete(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	namespace, name, err := idParts(d.Id())
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 	log.Printf("[INFO] Deleting network policy: %#v", name)
-	err = conn.NetworkingV1().NetworkPolicies(namespace).Delete(name, &meta_v1.DeleteOptions{})
+	err = conn.NetworkingV1().NetworkPolicies(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	log.Printf("[INFO] Network Policy %s deleted", name)
@@ -349,7 +356,7 @@ func resourceKubernetesNetworkPolicyDelete(d *schema.ResourceData, meta interfac
 	return nil
 }
 
-func resourceKubernetesNetworkPolicyExists(d *schema.ResourceData, meta interface{}) (bool, error) {
+func resourceKubernetesNetworkPolicyExists(ctx context.Context, d *schema.ResourceData, meta interface{}) (bool, error) {
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
 		return false, err
@@ -361,7 +368,7 @@ func resourceKubernetesNetworkPolicyExists(d *schema.ResourceData, meta interfac
 	}
 
 	log.Printf("[INFO] Checking network policy %s", name)
-	_, err = conn.NetworkingV1().NetworkPolicies(namespace).Get(name, meta_v1.GetOptions{})
+	_, err = conn.NetworkingV1().NetworkPolicies(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		if statusErr, ok := err.(*errors.StatusError); ok && statusErr.ErrStatus.Code == 404 {
 			return false, nil

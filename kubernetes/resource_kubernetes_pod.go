@@ -1,12 +1,15 @@
 package kubernetes
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"time"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -15,18 +18,14 @@ import (
 
 func resourceKubernetesPod() *schema.Resource {
 	podSpecFields := podSpecFields(false, false, false)
-	// Setting this default to false prevents a perpetual diff caused by volume_mounts
-	// being mutated on the server side as Kubernetes automatically adds a mount
-	// for the service account token
-	podSpecFields["automount_service_account_token"].Default = false
+
 	return &schema.Resource{
-		Create: resourceKubernetesPodCreate,
-		Read:   resourceKubernetesPodRead,
-		Update: resourceKubernetesPodUpdate,
-		Delete: resourceKubernetesPodDelete,
-		Exists: resourceKubernetesPodExists,
+		CreateContext: resourceKubernetesPodCreate,
+		ReadContext:   resourceKubernetesPodRead,
+		UpdateContext: resourceKubernetesPodUpdate,
+		DeleteContext: resourceKubernetesPodDelete,
 		Importer: &schema.ResourceImporter{
-			State: schema.ImportStatePassthrough,
+			StateContext: schema.ImportStatePassthroughContext,
 		},
 
 		Timeouts: &schema.ResourceTimeout{
@@ -48,16 +47,16 @@ func resourceKubernetesPod() *schema.Resource {
 		},
 	}
 }
-func resourceKubernetesPodCreate(d *schema.ResourceData, meta interface{}) error {
+func resourceKubernetesPodCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	metadata := expandMetadata(d.Get("metadata").([]interface{}))
 	spec, err := expandPodSpec(d.Get("spec").([]interface{}))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	pod := api.Pod{
@@ -66,10 +65,10 @@ func resourceKubernetesPodCreate(d *schema.ResourceData, meta interface{}) error
 	}
 
 	log.Printf("[INFO] Creating new pod: %#v", pod)
-	out, err := conn.CoreV1().Pods(metadata.Namespace).Create(&pod)
+	out, err := conn.CoreV1().Pods(metadata.Namespace).Create(ctx, &pod, metav1.CreateOptions{})
 
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 	log.Printf("[INFO] Submitted new pod: %#v", out)
 
@@ -80,7 +79,7 @@ func resourceKubernetesPodCreate(d *schema.ResourceData, meta interface{}) error
 		Pending: []string{"Pending"},
 		Timeout: d.Timeout(schema.TimeoutCreate),
 		Refresh: func() (interface{}, string, error) {
-			out, err := conn.CoreV1().Pods(metadata.Namespace).Get(metadata.Name, metav1.GetOptions{})
+			out, err := conn.CoreV1().Pods(metadata.Namespace).Get(ctx, metadata.Name, metav1.GetOptions{})
 			if err != nil {
 				log.Printf("[ERROR] Received error: %#v", err)
 				return out, "Error", err
@@ -91,111 +90,118 @@ func resourceKubernetesPodCreate(d *schema.ResourceData, meta interface{}) error
 			return out, statusPhase, nil
 		},
 	}
-	_, err = stateConf.WaitForState()
+	_, err = stateConf.WaitForStateContext(ctx)
 	if err != nil {
-		lastWarnings, wErr := getLastWarningsForObject(conn, out.ObjectMeta, "Pod", 3)
+		lastWarnings, wErr := getLastWarningsForObject(ctx, conn, out.ObjectMeta, "Pod", 3)
 		if wErr != nil {
-			return wErr
+			return diag.FromErr(wErr)
 		}
-		return fmt.Errorf("%s%s", err, stringifyEvents(lastWarnings))
+		return diag.Errorf("%s%s", err, stringifyEvents(lastWarnings))
 	}
 	log.Printf("[INFO] Pod %s created", out.Name)
 
-	return resourceKubernetesPodRead(d, meta)
+	return resourceKubernetesPodRead(ctx, d, meta)
 }
 
-func resourceKubernetesPodUpdate(d *schema.ResourceData, meta interface{}) error {
+func resourceKubernetesPodUpdate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	namespace, name, err := idParts(d.Id())
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	ops := patchMetadata("metadata.0.", "/metadata/", d)
 	if d.HasChange("spec") {
 		specOps, err := patchPodSpec("/spec", "spec.0.", d)
 		if err != nil {
-			return err
+			return diag.FromErr(err)
 		}
 		ops = append(ops, specOps...)
 	}
 	data, err := ops.MarshalJSON()
 	if err != nil {
-		return fmt.Errorf("Failed to marshal update operations: %s", err)
+		return diag.Errorf("Failed to marshal update operations: %s", err)
 	}
 
 	log.Printf("[INFO] Updating pod %s: %s", d.Id(), ops)
 
-	out, err := conn.CoreV1().Pods(namespace).Patch(name, pkgApi.JSONPatchType, data)
+	out, err := conn.CoreV1().Pods(namespace).Patch(ctx, name, pkgApi.JSONPatchType, data, metav1.PatchOptions{})
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 	log.Printf("[INFO] Submitted updated pod: %#v", out)
 
 	d.SetId(buildId(out.ObjectMeta))
-	return resourceKubernetesPodRead(d, meta)
+	return resourceKubernetesPodRead(ctx, d, meta)
 }
 
-func resourceKubernetesPodRead(d *schema.ResourceData, meta interface{}) error {
+func resourceKubernetesPodRead(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	exists, err := resourceKubernetesPodExists(ctx, d, meta)
+	if err != nil {
+		return diag.FromErr(err)
+	}
+	if !exists {
+		return diag.Diagnostics{}
+	}
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	namespace, name, err := idParts(d.Id())
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	log.Printf("[INFO] Reading pod %s", name)
-	pod, err := conn.CoreV1().Pods(namespace).Get(name, metav1.GetOptions{})
+	pod, err := conn.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		log.Printf("[DEBUG] Received error: %#v", err)
-		return err
+		return diag.FromErr(err)
 	}
 	log.Printf("[INFO] Received pod: %#v", pod)
 
 	err = d.Set("metadata", flattenMetadata(pod.ObjectMeta, d))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	podSpec, err := flattenPodSpec(pod.Spec)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	err = d.Set("spec", podSpec)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 	return nil
 
 }
 
-func resourceKubernetesPodDelete(d *schema.ResourceData, meta interface{}) error {
+func resourceKubernetesPodDelete(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	namespace, name, err := idParts(d.Id())
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	log.Printf("[INFO] Deleting pod: %#v", name)
-	err = conn.CoreV1().Pods(namespace).Delete(name, nil)
+	err = conn.CoreV1().Pods(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
-	err = resource.Retry(d.Timeout(schema.TimeoutDelete), func() *resource.RetryError {
-		out, err := conn.CoreV1().Pods(namespace).Get(name, metav1.GetOptions{})
+	err = resource.RetryContext(ctx, d.Timeout(schema.TimeoutDelete), func() *resource.RetryError {
+		out, err := conn.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			if statusErr, ok := err.(*errors.StatusError); ok && statusErr.ErrStatus.Code == 404 {
 				return nil
@@ -208,7 +214,7 @@ func resourceKubernetesPodDelete(d *schema.ResourceData, meta interface{}) error
 		return resource.RetryableError(e)
 	})
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	log.Printf("[INFO] Pod %s deleted", name)
@@ -217,7 +223,7 @@ func resourceKubernetesPodDelete(d *schema.ResourceData, meta interface{}) error
 	return nil
 }
 
-func resourceKubernetesPodExists(d *schema.ResourceData, meta interface{}) (bool, error) {
+func resourceKubernetesPodExists(ctx context.Context, d *schema.ResourceData, meta interface{}) (bool, error) {
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
 		return false, err
@@ -229,7 +235,7 @@ func resourceKubernetesPodExists(d *schema.ResourceData, meta interface{}) (bool
 	}
 
 	log.Printf("[INFO] Checking pod %s", name)
-	_, err = conn.CoreV1().Pods(namespace).Get(name, metav1.GetOptions{})
+	_, err = conn.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		if statusErr, ok := err.(*errors.StatusError); ok && statusErr.ErrStatus.Code == 404 {
 			return false, nil

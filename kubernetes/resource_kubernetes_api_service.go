@@ -1,11 +1,12 @@
 package kubernetes
 
 import (
-	"fmt"
+	"context"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"log"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"k8s.io/apimachinery/pkg/api/errors"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	pkgApi "k8s.io/apimachinery/pkg/types"
@@ -14,13 +15,12 @@ import (
 
 func resourceKubernetesAPIService() *schema.Resource {
 	return &schema.Resource{
-		Create: resourceKubernetesAPIServiceCreate,
-		Read:   resourceKubernetesAPIServiceRead,
-		Exists: resourceKubernetesAPIServiceExists,
-		Update: resourceKubernetesAPIServiceUpdate,
-		Delete: resourceKubernetesAPIServiceDelete,
+		CreateContext: resourceKubernetesAPIServiceCreate,
+		ReadContext:   resourceKubernetesAPIServiceRead,
+		UpdateContext: resourceKubernetesAPIServiceUpdate,
+		DeleteContext: resourceKubernetesAPIServiceDelete,
 		Importer: &schema.ResourceImporter{
-			State: schema.ImportStatePassthrough,
+			StateContext: schema.ImportStatePassthroughContext,
 		},
 
 		Schema: map[string]*schema.Schema{
@@ -44,7 +44,7 @@ func resourceKubernetesAPIService() *schema.Resource {
 						},
 						"group_priority_minimum": {
 							Type:         schema.TypeInt,
-							Description:  "GroupPriorityMininum is the priority this group should have at least. Higher priority means that the group is preferred by clients over lower priority ones. Note that other versions of this group might specify even higher GroupPriorityMininum values such that the whole group gets a higher priority. The primary sort is based on GroupPriorityMinimum, ordered highest number to lowest (20 before 10). The secondary sort is based on the alphabetical comparison of the name of the object. (v1.bar before v1.foo) We'd recommend something like: *.k8s.io (except extensions) at 18000 and PaaSes (OpenShift, Deis) are recommended to be in the 2000s.",
+							Description:  "GroupPriorityMinimum is the priority this group should have at least. Higher priority means that the group is preferred by clients over lower priority ones. Note that other versions of this group might specify even higher GroupPriorityMininum values such that the whole group gets a higher priority. The primary sort is based on GroupPriorityMinimum, ordered highest number to lowest (20 before 10). The secondary sort is based on the alphabetical comparison of the name of the object. (v1.bar before v1.foo) We'd recommend something like: *.k8s.io (except extensions) at 18000 and PaaSes (OpenShift, Deis) are recommended to be in the 2000s.",
 							Required:     true,
 							ValidateFunc: validation.IntBetween(0, 20000),
 						},
@@ -100,10 +100,10 @@ func resourceKubernetesAPIService() *schema.Resource {
 	}
 }
 
-func resourceKubernetesAPIServiceCreate(d *schema.ResourceData, meta interface{}) error {
+func resourceKubernetesAPIServiceCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn, err := meta.(KubeClientsets).AggregatorClientset()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	metadata := expandMetadata(d.Get("metadata").([]interface{}))
@@ -111,55 +111,61 @@ func resourceKubernetesAPIServiceCreate(d *schema.ResourceData, meta interface{}
 		ObjectMeta: metadata,
 		Spec:       expandAPIServiceSpec(d.Get("spec").([]interface{})),
 	}
+
 	log.Printf("[INFO] Creating new API service: %#v", svc)
-	out, err := conn.ApiregistrationV1().APIServices().Create(&svc)
+	out, err := conn.ApiregistrationV1().APIServices().Create(ctx, &svc, meta_v1.CreateOptions{})
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 	log.Printf("[INFO] Submitted new API service: %#v", out)
 	d.SetId(out.ObjectMeta.Name)
 
-	return resourceKubernetesAPIServiceRead(d, meta)
+	return resourceKubernetesAPIServiceRead(ctx, d, meta)
 }
 
-func resourceKubernetesAPIServiceRead(d *schema.ResourceData, meta interface{}) error {
+func resourceKubernetesAPIServiceRead(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	exists, err := resourceKubernetesAPIServiceExists(ctx, d, meta)
+	if err != nil {
+		return diag.FromErr(err)
+	}
+	if !exists {
+		return diag.Diagnostics{}
+	}
 	conn, err := meta.(KubeClientsets).AggregatorClientset()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	name := d.Id()
-
 	log.Printf("[INFO] Reading service %s", name)
-	svc, err := conn.ApiregistrationV1().APIServices().Get(name, meta_v1.GetOptions{})
+	svc, err := conn.ApiregistrationV1().APIServices().Get(ctx, name, meta_v1.GetOptions{})
 	if err != nil {
 		log.Printf("[DEBUG] Received error: %#v", err)
-		return err
+		return diag.FromErr(err)
 	}
 	log.Printf("[INFO] Received API service: %#v", svc)
 	err = d.Set("metadata", flattenMetadata(svc.ObjectMeta, d))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	flattened := flattenAPIServiceSpec(svc.Spec)
 	log.Printf("[DEBUG] Flattened API service spec: %#v", flattened)
 	err = d.Set("spec", flattened)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	return nil
 }
 
-func resourceKubernetesAPIServiceUpdate(d *schema.ResourceData, meta interface{}) error {
+func resourceKubernetesAPIServiceUpdate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn, err := meta.(KubeClientsets).AggregatorClientset()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	name := d.Id()
-
 	ops := patchMetadata("metadata.0.", "/metadata/", d)
 	if d.HasChange("spec") {
 		ops = append(ops, &ReplaceOperation{
@@ -169,31 +175,31 @@ func resourceKubernetesAPIServiceUpdate(d *schema.ResourceData, meta interface{}
 	}
 	data, err := ops.MarshalJSON()
 	if err != nil {
-		return fmt.Errorf("Failed to marshal update operations: %s", err)
+		return diag.Errorf("Failed to marshal update operations: %s", err)
 	}
 	log.Printf("[INFO] Updating service %q: %v", name, string(data))
-	out, err := conn.ApiregistrationV1().APIServices().Patch(name, pkgApi.JSONPatchType, data)
+	out, err := conn.ApiregistrationV1().APIServices().Patch(ctx, name, pkgApi.JSONPatchType, data, meta_v1.PatchOptions{})
 	if err != nil {
-		return fmt.Errorf("Failed to update API service: %s", err)
+		return diag.Errorf("Failed to update API service: %s", err)
 	}
 	log.Printf("[INFO] Submitted updated API service: %#v", out)
 	d.SetId(out.ObjectMeta.Name)
 
-	return resourceKubernetesAPIServiceRead(d, meta)
+	return resourceKubernetesAPIServiceRead(ctx, d, meta)
 }
 
-func resourceKubernetesAPIServiceDelete(d *schema.ResourceData, meta interface{}) error {
+func resourceKubernetesAPIServiceDelete(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn, err := meta.(KubeClientsets).AggregatorClientset()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	name := d.Id()
 
 	log.Printf("[INFO] Deleting API service: %#v", name)
-	err = conn.ApiregistrationV1().APIServices().Delete(name, &meta_v1.DeleteOptions{})
+	err = conn.ApiregistrationV1().APIServices().Delete(ctx, name, meta_v1.DeleteOptions{})
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	log.Printf("[INFO] API service %s deleted", name)
@@ -202,7 +208,7 @@ func resourceKubernetesAPIServiceDelete(d *schema.ResourceData, meta interface{}
 	return nil
 }
 
-func resourceKubernetesAPIServiceExists(d *schema.ResourceData, meta interface{}) (bool, error) {
+func resourceKubernetesAPIServiceExists(ctx context.Context, d *schema.ResourceData, meta interface{}) (bool, error) {
 	conn, err := meta.(KubeClientsets).AggregatorClientset()
 	if err != nil {
 		return false, err
@@ -211,7 +217,7 @@ func resourceKubernetesAPIServiceExists(d *schema.ResourceData, meta interface{}
 	name := d.Id()
 
 	log.Printf("[INFO] Checking API service %s", name)
-	_, err = conn.ApiregistrationV1().APIServices().Get(name, meta_v1.GetOptions{})
+	_, err = conn.ApiregistrationV1().APIServices().Get(ctx, name, meta_v1.GetOptions{})
 	if err != nil {
 		if statusErr, ok := err.(*errors.StatusError); ok && statusErr.ErrStatus.Code == 404 {
 			return false, nil

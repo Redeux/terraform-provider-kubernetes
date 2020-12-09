@@ -1,38 +1,40 @@
 package kubernetes
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/acctest"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	api "k8s.io/api/core/v1"
-	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestAccKubernetesLimitRange_basic(t *testing.T) {
 	var conf api.LimitRange
 	name := fmt.Sprintf("tf-acc-test-%s", acctest.RandString(10))
+	resourceName := "kubernetes_limit_range.test"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:      func() { testAccPreCheck(t) },
-		IDRefreshName: "kubernetes_limit_range.test",
-		Providers:     testAccProviders,
-		CheckDestroy:  testAccCheckKubernetesLimitRangeDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		IDRefreshName:     "kubernetes_limit_range.test",
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccCheckKubernetesLimitRangeDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccKubernetesLimitRangeConfig_basic(name),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					testAccCheckKubernetesLimitRangeExists("kubernetes_limit_range.test", &conf),
+					testAccCheckKubernetesLimitRangeExists(resourceName, &conf),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.annotations.%", "1"),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.annotations.TestAnnotationOne", "one"),
-					testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{"TestAnnotationOne": "one"}),
+					//testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{"TestAnnotationOne": "one"}),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.labels.%", "3"),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.labels.TestLabelOne", "one"),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.labels.TestLabelThree", "three"),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.labels.TestLabelFour", "four"),
-					testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{"TestLabelOne": "one", "TestLabelThree": "three", "TestLabelFour": "four"}),
+					//testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{"TestLabelOne": "one", "TestLabelThree": "three", "TestLabelFour": "four"}),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.name", name),
 					resource.TestCheckResourceAttrSet("kubernetes_limit_range.test", "metadata.0.generation"),
 					resource.TestCheckResourceAttrSet("kubernetes_limit_range.test", "metadata.0.resource_version"),
@@ -49,18 +51,24 @@ func TestAccKubernetesLimitRange_basic(t *testing.T) {
 				),
 			},
 			{
+				ResourceName:            resourceName,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"metadata.0.resource_version"},
+			},
+			{
 				Config: testAccKubernetesLimitRangeConfig_metaModified(name),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					testAccCheckKubernetesLimitRangeExists("kubernetes_limit_range.test", &conf),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.annotations.%", "2"),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.annotations.TestAnnotationOne", "one"),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.annotations.TestAnnotationTwo", "two"),
-					testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{"TestAnnotationOne": "one", "TestAnnotationTwo": "two"}),
+					//testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{"TestAnnotationOne": "one", "TestAnnotationTwo": "two"}),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.labels.%", "3"),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.labels.TestLabelOne", "one"),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.labels.TestLabelTwo", "two"),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.labels.TestLabelThree", "three"),
-					testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{"TestLabelOne": "one", "TestLabelTwo": "two", "TestLabelThree": "three"}),
+					//testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{"TestLabelOne": "one", "TestLabelTwo": "two", "TestLabelThree": "three"}),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.name", name),
 					resource.TestCheckResourceAttrSet("kubernetes_limit_range.test", "metadata.0.generation"),
 					resource.TestCheckResourceAttrSet("kubernetes_limit_range.test", "metadata.0.resource_version"),
@@ -81,9 +89,9 @@ func TestAccKubernetesLimitRange_basic(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					testAccCheckKubernetesLimitRangeExists("kubernetes_limit_range.test", &conf),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.annotations.%", "0"),
-					testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{}),
+					//testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{}),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.labels.%", "0"),
-					testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{}),
+					//testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{}),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.name", name),
 					resource.TestCheckResourceAttrSet("kubernetes_limit_range.test", "metadata.0.generation"),
 					resource.TestCheckResourceAttrSet("kubernetes_limit_range.test", "metadata.0.resource_version"),
@@ -113,19 +121,19 @@ func TestAccKubernetesLimitRange_empty(t *testing.T) {
 	name := fmt.Sprintf("tf-acc-test-%s", acctest.RandString(10))
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:      func() { testAccPreCheck(t) },
-		IDRefreshName: "kubernetes_limit_range.test",
-		Providers:     testAccProviders,
-		CheckDestroy:  testAccCheckKubernetesLimitRangeDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		IDRefreshName:     "kubernetes_limit_range.test",
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccCheckKubernetesLimitRangeDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccKubernetesLimitRangeConfig_empty(name),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					testAccCheckKubernetesLimitRangeExists("kubernetes_limit_range.test", &conf),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.annotations.%", "0"),
-					testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{}),
+					//testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{}),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.labels.%", "0"),
-					testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{}),
+					//testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{}),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.name", name),
 					resource.TestCheckResourceAttrSet("kubernetes_limit_range.test", "metadata.0.generation"),
 					resource.TestCheckResourceAttrSet("kubernetes_limit_range.test", "metadata.0.resource_version"),
@@ -143,19 +151,19 @@ func TestAccKubernetesLimitRange_generatedName(t *testing.T) {
 	prefix := "tf-acc-test-"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:      func() { testAccPreCheck(t) },
-		IDRefreshName: "kubernetes_limit_range.test",
-		Providers:     testAccProviders,
-		CheckDestroy:  testAccCheckKubernetesLimitRangeDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		IDRefreshName:     "kubernetes_limit_range.test",
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccCheckKubernetesLimitRangeDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccKubernetesLimitRangeConfig_generatedName(prefix),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					testAccCheckKubernetesLimitRangeExists("kubernetes_limit_range.test", &conf),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.annotations.%", "0"),
-					testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{}),
+					//testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{}),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.labels.%", "0"),
-					testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{}),
+					//testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{}),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.generate_name", prefix),
 					resource.TestCheckResourceAttrSet("kubernetes_limit_range.test", "metadata.0.generation"),
 					resource.TestCheckResourceAttrSet("kubernetes_limit_range.test", "metadata.0.resource_version"),
@@ -174,19 +182,19 @@ func TestAccKubernetesLimitRange_typeChange(t *testing.T) {
 	name := fmt.Sprintf("tf-acc-test-%s", acctest.RandString(10))
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:      func() { testAccPreCheck(t) },
-		IDRefreshName: "kubernetes_limit_range.test",
-		Providers:     testAccProviders,
-		CheckDestroy:  testAccCheckKubernetesLimitRangeDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		IDRefreshName:     "kubernetes_limit_range.test",
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccCheckKubernetesLimitRangeDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccKubernetesLimitRangeConfig_typeChange(name),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					testAccCheckKubernetesLimitRangeExists("kubernetes_limit_range.test", &conf),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.annotations.%", "0"),
-					testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{}),
+					//testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{}),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.labels.%", "0"),
-					testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{}),
+					//testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{}),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.name", name),
 					resource.TestCheckResourceAttrSet("kubernetes_limit_range.test", "metadata.0.generation"),
 					resource.TestCheckResourceAttrSet("kubernetes_limit_range.test", "metadata.0.resource_version"),
@@ -204,9 +212,9 @@ func TestAccKubernetesLimitRange_typeChange(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					testAccCheckKubernetesLimitRangeExists("kubernetes_limit_range.test", &conf),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.annotations.%", "0"),
-					testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{}),
+					//testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{}),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.labels.%", "0"),
-					testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{}),
+					//testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{}),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.name", name),
 					resource.TestCheckResourceAttrSet("kubernetes_limit_range.test", "metadata.0.generation"),
 					resource.TestCheckResourceAttrSet("kubernetes_limit_range.test", "metadata.0.resource_version"),
@@ -228,19 +236,19 @@ func TestAccKubernetesLimitRange_multipleLimits(t *testing.T) {
 	name := fmt.Sprintf("tf-acc-test-%s", acctest.RandString(10))
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:      func() { testAccPreCheck(t) },
-		IDRefreshName: "kubernetes_limit_range.test",
-		Providers:     testAccProviders,
-		CheckDestroy:  testAccCheckKubernetesLimitRangeDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		IDRefreshName:     "kubernetes_limit_range.test",
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccCheckKubernetesLimitRangeDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccKubernetesLimitRangeConfig_multipleLimits(name),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					testAccCheckKubernetesLimitRangeExists("kubernetes_limit_range.test", &conf),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.annotations.%", "0"),
-					testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{}),
+					//testAccCheckMetaAnnotations(&conf.ObjectMeta, map[string]string{}),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.labels.%", "0"),
-					testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{}),
+					//testAccCheckMetaLabels(&conf.ObjectMeta, map[string]string{}),
 					resource.TestCheckResourceAttr("kubernetes_limit_range.test", "metadata.0.name", name),
 					resource.TestCheckResourceAttrSet("kubernetes_limit_range.test", "metadata.0.generation"),
 					resource.TestCheckResourceAttrSet("kubernetes_limit_range.test", "metadata.0.resource_version"),
@@ -264,33 +272,13 @@ func TestAccKubernetesLimitRange_multipleLimits(t *testing.T) {
 	})
 }
 
-func TestAccKubernetesLimitRange_importBasic(t *testing.T) {
-	resourceName := "kubernetes_limit_range.test"
-	name := fmt.Sprintf("tf-acc-test-%s", acctest.RandString(10))
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckKubernetesLimitRangeDestroy,
-		Steps: []resource.TestStep{
-			{
-				Config: testAccKubernetesLimitRangeConfig_basic(name),
-			},
-			{
-				ResourceName:            resourceName,
-				ImportState:             true,
-				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"metadata.0.resource_version"},
-			},
-		},
-	})
-}
-
 func testAccCheckKubernetesLimitRangeDestroy(s *terraform.State) error {
 	conn, err := testAccProvider.Meta().(KubeClientsets).MainClientset()
+
 	if err != nil {
 		return err
 	}
+	ctx := context.TODO()
 
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "kubernetes_limit_range" {
@@ -302,7 +290,7 @@ func testAccCheckKubernetesLimitRangeDestroy(s *terraform.State) error {
 			return err
 		}
 
-		resp, err := conn.CoreV1().LimitRanges(namespace).Get(name, meta_v1.GetOptions{})
+		resp, err := conn.CoreV1().LimitRanges(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err == nil {
 			if resp.Namespace == namespace && resp.Name == name {
 				return fmt.Errorf("Limit Range still exists: %s", rs.Primary.ID)
@@ -324,13 +312,14 @@ func testAccCheckKubernetesLimitRangeExists(n string, obj *api.LimitRange) resou
 		if err != nil {
 			return err
 		}
+		ctx := context.TODO()
 
 		namespace, name, err := idParts(rs.Primary.ID)
 		if err != nil {
 			return err
 		}
 
-		out, err := conn.CoreV1().LimitRanges(namespace).Get(name, meta_v1.GetOptions{})
+		out, err := conn.CoreV1().LimitRanges(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
@@ -341,8 +330,7 @@ func testAccCheckKubernetesLimitRangeExists(n string, obj *api.LimitRange) resou
 }
 
 func testAccKubernetesLimitRangeConfig_empty(name string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_limit_range" "test" {
+	return fmt.Sprintf(`resource "kubernetes_limit_range" "test" {
   metadata {
     name = "%s"
   }
@@ -351,8 +339,7 @@ resource "kubernetes_limit_range" "test" {
 }
 
 func testAccKubernetesLimitRangeConfig_basic(name string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_limit_range" "test" {
+	return fmt.Sprintf(`resource "kubernetes_limit_range" "test" {
   metadata {
     annotations = {
       TestAnnotationOne = "one"
@@ -387,8 +374,7 @@ resource "kubernetes_limit_range" "test" {
 }
 
 func testAccKubernetesLimitRangeConfig_metaModified(name string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_limit_range" "test" {
+	return fmt.Sprintf(`resource "kubernetes_limit_range" "test" {
   metadata {
     annotations = {
       TestAnnotationOne = "one"
@@ -424,8 +410,7 @@ resource "kubernetes_limit_range" "test" {
 }
 
 func testAccKubernetesLimitRangeConfig_specModified(name string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_limit_range" "test" {
+	return fmt.Sprintf(`resource "kubernetes_limit_range" "test" {
   metadata {
     name = "%s"
   }
@@ -454,8 +439,7 @@ resource "kubernetes_limit_range" "test" {
 }
 
 func testAccKubernetesLimitRangeConfig_generatedName(prefix string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_limit_range" "test" {
+	return fmt.Sprintf(`resource "kubernetes_limit_range" "test" {
   metadata {
     generate_name = "%s"
   }
@@ -470,8 +454,7 @@ resource "kubernetes_limit_range" "test" {
 }
 
 func testAccKubernetesLimitRangeConfig_typeChange(name string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_limit_range" "test" {
+	return fmt.Sprintf(`resource "kubernetes_limit_range" "test" {
   metadata {
     name = "%s"
   }
@@ -491,8 +474,7 @@ resource "kubernetes_limit_range" "test" {
 }
 
 func testAccKubernetesLimitRangeConfig_typeChangeModified(name string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_limit_range" "test" {
+	return fmt.Sprintf(`resource "kubernetes_limit_range" "test" {
   metadata {
     name = "%s"
   }
@@ -512,8 +494,7 @@ resource "kubernetes_limit_range" "test" {
 }
 
 func testAccKubernetesLimitRangeConfig_multipleLimits(name string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_limit_range" "test" {
+	return fmt.Sprintf(`resource "kubernetes_limit_range" "test" {
   metadata {
     name = "%s"
   }

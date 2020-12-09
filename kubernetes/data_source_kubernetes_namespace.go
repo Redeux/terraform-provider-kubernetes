@@ -1,16 +1,17 @@
 package kubernetes
 
 import (
-	"log"
-
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"context"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	v1 "k8s.io/api/core/v1"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"log"
 )
 
 func dataSourceKubernetesNamespace() *schema.Resource {
 	return &schema.Resource{
-		Read: dataSourceKubernetesNamespaceRead,
+		ReadContext: dataSourceKubernetesNamespaceRead,
 
 		Schema: map[string]*schema.Schema{
 			"metadata": metadataSchema("namespace", false),
@@ -18,7 +19,6 @@ func dataSourceKubernetesNamespace() *schema.Resource {
 				Type:        schema.TypeList,
 				Description: "Spec defines the behavior of the Namespace.",
 				Computed:    true,
-				MaxItems:    1,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"finalizers": {
@@ -36,28 +36,28 @@ func dataSourceKubernetesNamespace() *schema.Resource {
 	}
 }
 
-func dataSourceKubernetesNamespaceRead(d *schema.ResourceData, meta interface{}) error {
+func dataSourceKubernetesNamespaceRead(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	metadata := expandMetadata(d.Get("metadata").([]interface{}))
 	d.SetId(metadata.Name)
 
-	namespace, err := conn.CoreV1().Namespaces().Get(metadata.Name, meta_v1.GetOptions{})
+	namespace, err := conn.CoreV1().Namespaces().Get(ctx, metadata.Name, meta_v1.GetOptions{})
 	if err != nil {
 		log.Printf("[DEBUG] Received error: %#v", err)
-		return err
+		return diag.FromErr(err)
 	}
 	log.Printf("[INFO] Received namespace: %#v", namespace)
 	err = d.Set("metadata", flattenMetadata(namespace.ObjectMeta, d))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 	err = d.Set("spec", flattenNamespaceSpec(&namespace.Spec))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 	return nil
 }

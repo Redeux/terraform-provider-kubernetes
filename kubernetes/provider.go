@@ -2,17 +2,18 @@ package kubernetes
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"log"
 	"net/http"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/logging"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/logging"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/mitchellh/go-homedir"
 	apimachineryschema "k8s.io/apimachinery/pkg/runtime/schema"
-	discovery "k8s.io/client-go/discovery"
-	kubernetes "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	restclient "k8s.io/client-go/rest"
 
@@ -21,7 +22,7 @@ import (
 	aggregator "k8s.io/kube-aggregator/pkg/client/clientset_generated/clientset"
 )
 
-func Provider() terraform.ResourceProvider {
+func Provider() *schema.Provider {
 	p := &schema.Provider{
 		Schema: map[string]*schema.Schema{
 			"host": {
@@ -151,12 +152,14 @@ func Provider() terraform.ResourceProvider {
 
 		ResourcesMap: map[string]*schema.Resource{
 			"kubernetes_api_service":                      resourceKubernetesAPIService(),
+			"kubernetes_certificate_signing_request":      resourceKubernetesCertificateSigningRequest(),
 			"kubernetes_cluster_role":                     resourceKubernetesClusterRole(),
 			"kubernetes_cluster_role_binding":             resourceKubernetesClusterRoleBinding(),
 			"kubernetes_config_map":                       resourceKubernetesConfigMap(),
 			"kubernetes_cron_job":                         resourceKubernetesCronJob(),
 			"kubernetes_csi_driver":                       resourceKubernetesCSIDriver(),
 			"kubernetes_daemonset":                        resourceKubernetesDaemonSet(),
+			"kubernetes_default_service_account":          resourceKubernetesDefaultServiceAccount(),
 			"kubernetes_deployment":                       resourceKubernetesDeployment(),
 			"kubernetes_endpoints":                        resourceKubernetesEndpoints(),
 			"kubernetes_horizontal_pod_autoscaler":        resourceKubernetesHorizontalPodAutoscaler(),
@@ -185,14 +188,8 @@ func Provider() terraform.ResourceProvider {
 		},
 	}
 
-	p.ConfigureFunc = func(d *schema.ResourceData) (interface{}, error) {
-		terraformVersion := p.TerraformVersion
-		if terraformVersion == "" {
-			// Terraform 0.12 introduced this field to the protocol
-			// We can therefore assume that if it's missing it's 0.10 or 0.11
-			terraformVersion = "0.11+compatible"
-		}
-		return providerConfigure(d, terraformVersion)
+	p.ConfigureContextFunc = func(ctx context.Context, d *schema.ResourceData) (interface{}, diag.Diagnostics) {
+		return providerConfigure(ctx, d, p.TerraformVersion)
 	}
 
 	return p
@@ -237,12 +234,12 @@ func (k kubeClientsets) AggregatorClientset() (*aggregator.Clientset, error) {
 	return k.aggregatorClientset, nil
 }
 
-func providerConfigure(d *schema.ResourceData, terraformVersion string) (interface{}, error) {
+func providerConfigure(ctx context.Context, d *schema.ResourceData, terraformVersion string) (interface{}, diag.Diagnostics) {
 
 	// Config initialization
 	cfg, err := initializeConfiguration(d)
 	if err != nil {
-		return nil, err
+		return nil, diag.FromErr(err)
 	}
 	if cfg == nil {
 		// This is a TEMPORARY measure to work around https://github.com/hashicorp/terraform/issues/24055
@@ -266,7 +263,7 @@ func providerConfigure(d *schema.ResourceData, terraformVersion string) (interfa
 		mainClientset:       nil,
 		aggregatorClientset: nil,
 	}
-	return m, nil
+	return m, diag.Diagnostics{}
 }
 
 func initializeConfiguration(d *schema.ResourceData) (*restclient.Config, error) {
@@ -285,13 +282,13 @@ func initializeConfiguration(d *schema.ResourceData) (*restclient.Config, error)
 
 			ctxSuffix := "; default context"
 
-			ctx, ctxOk := d.GetOk("config_context")
+			kubectx, ctxOk := d.GetOk("config_context")
 			authInfo, authInfoOk := d.GetOk("config_context_auth_info")
 			cluster, clusterOk := d.GetOk("config_context_cluster")
 			if ctxOk || authInfoOk || clusterOk {
 				ctxSuffix = "; overriden context"
 				if ctxOk {
-					overrides.CurrentContext = ctx.(string)
+					overrides.CurrentContext = kubectx.(string)
 					ctxSuffix += fmt.Sprintf("; config ctx: %s", overrides.CurrentContext)
 					log.Printf("[DEBUG] Using custom current context: %q", overrides.CurrentContext)
 				}

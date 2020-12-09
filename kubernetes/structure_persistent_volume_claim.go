@@ -3,7 +3,7 @@ package kubernetes
 import (
 	"errors"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"k8s.io/api/core/v1"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -39,7 +39,7 @@ func flattenResourceRequirements(in v1.ResourceRequirements) []interface{} {
 
 // Expanders
 
-func expandPersistenVolumeClaim(p map[string]interface{}) (*corev1.PersistentVolumeClaim, error) {
+func expandPersistentVolumeClaim(p map[string]interface{}) (*corev1.PersistentVolumeClaim, error) {
 	pvc := &corev1.PersistentVolumeClaim{}
 	if len(p) == 0 {
 		return pvc, nil

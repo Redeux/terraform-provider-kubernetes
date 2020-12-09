@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
@@ -205,6 +206,9 @@ func flattenResourceFieldSelector(in *v1.ResourceFieldSelector) []interface{} {
 	if in.Resource != "" {
 		att["resource"] = in.Resource
 	}
+	if in.Divisor.String() != "" {
+		att["divisor"] = in.Divisor.String()
+	}
 	return []interface{}{att}
 }
 
@@ -339,10 +343,10 @@ func flattenContainerPorts(in []v1.ContainerPort) []interface{} {
 func flattenContainerResourceRequirements(in v1.ResourceRequirements) ([]interface{}, error) {
 	att := make(map[string]interface{})
 	if len(in.Limits) > 0 {
-		att["limits"] = []interface{}{flattenResourceList(in.Limits)}
+		att["limits"] = flattenResourceList(in.Limits)
 	}
 	if len(in.Requests) > 0 {
-		att["requests"] = []interface{}{flattenResourceList(in.Requests)}
+		att["requests"] = flattenResourceList(in.Requests)
 	}
 	return []interface{}{att}, nil
 }
@@ -362,6 +366,7 @@ func flattenContainers(in []v1.Container) ([]interface{}, error) {
 
 		c["image_pull_policy"] = v.ImagePullPolicy
 		c["termination_message_path"] = v.TerminationMessagePath
+		c["termination_message_policy"] = v.TerminationMessagePolicy
 		c["stdin"] = v.Stdin
 		c["stdin_once"] = v.StdinOnce
 		c["tty"] = v.TTY
@@ -491,6 +496,9 @@ func expandContainers(ctrs []interface{}) ([]v1.Container, error) {
 		}
 		if v, ok := ctr["termination_message_path"]; ok {
 			cs[i].TerminationMessagePath = v.(string)
+		}
+		if v, ok := ctr["termination_message_policy"]; ok {
+			cs[i].TerminationMessagePolicy = v1.TerminationMessagePolicy(v.(string))
 		}
 		if v, ok := ctr["tty"]; ok {
 			cs[i].TTY = v.(bool)
@@ -857,6 +865,13 @@ func expandResourceFieldRef(r []interface{}) (*v1.ResourceFieldSelector, error) 
 	if v, ok := in["resource"].(string); ok {
 		obj.Resource = v
 	}
+	if v, ok := in["divisor"].(string); ok {
+		q, err := resource.ParseQuantity(v)
+		if err != nil {
+			return obj, err
+		}
+		obj.Divisor = q
+	}
 	return obj, nil
 }
 
@@ -956,38 +971,20 @@ func expandContainerResourceRequirements(l []interface{}) (*v1.ResourceRequireme
 	}
 	in := l[0].(map[string]interface{})
 
-	fn := func(in []interface{}) (*v1.ResourceList, error) {
-		for _, c := range in {
-			p := c.(map[string]interface{})
-			if p["cpu"] == "" {
-				delete(p, "cpu")
-			}
-			if p["memory"] == "" {
-				delete(p, "memory")
-			}
-			rl, err := expandMapToResourceList(p)
-			if err != nil {
-				return rl, err
-			}
-			return rl, nil
-		}
-		return nil, nil
-	}
-
-	if v, ok := in["limits"].([]interface{}); ok && len(v) > 0 {
-		rl, err := fn(v)
+	if v, ok := in["limits"].(map[string]interface{}); ok && len(v) > 0 {
+		r, err := expandMapToResourceList(v)
 		if err != nil {
 			return obj, err
 		}
-		obj.Limits = *rl
+		obj.Limits = *r
 	}
 
-	if v, ok := in["requests"].([]interface{}); ok && len(v) > 0 {
-		rq, err := fn(v)
+	if v, ok := in["requests"].(map[string]interface{}); ok && len(v) > 0 {
+		r, err := expandMapToResourceList(v)
 		if err != nil {
 			return obj, err
 		}
-		obj.Requests = *rq
+		obj.Requests = *r
 	}
 
 	return obj, nil

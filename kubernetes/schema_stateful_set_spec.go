@@ -1,8 +1,8 @@
 package kubernetes
 
 import (
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func statefulSetSpecFields(isUpdatable bool) map[string]*schema.Schema {
@@ -19,11 +19,11 @@ func statefulSetSpecFields(isUpdatable bool) map[string]*schema.Schema {
 			}, false),
 		},
 		"replicas": {
-			Type:         schema.TypeInt,
+			Type:         schema.TypeString,
 			Optional:     true,
-			Default:      1,
+			Computed:     true,
 			Description:  "The desired number of replicas of the given Template, in the sense that they are instantiations of the same Template. Value must be a positive integer.",
-			ValidateFunc: validateNonNegativeInteger,
+			ValidateFunc: validateTypeStringNullableInt,
 		},
 		"revision_history_limit": {
 			Type:         schema.TypeInt,

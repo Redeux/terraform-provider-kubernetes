@@ -1,21 +1,23 @@
 package kubernetes
 
 import (
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"context"
+
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func dataSourceKubernetesService() *schema.Resource {
 	return &schema.Resource{
-		Read: dataSourceKubernetesServiceRead,
+		ReadContext: dataSourceKubernetesServiceRead,
 
 		Schema: map[string]*schema.Schema{
 			"metadata": namespacedMetadataSchema("service", false),
 			"spec": {
 				Type:        schema.TypeList,
 				Description: "Spec defines the behavior of a service. https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#spec-and-status",
-				MaxItems:    1,
 				Computed:    true,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
@@ -58,7 +60,6 @@ func dataSourceKubernetesService() *schema.Resource {
 						"port": {
 							Type:        schema.TypeList,
 							Description: "The list of ports that are exposed by this service. More info: http://kubernetes.io/docs/user-guide/services#virtual-ips-and-service-proxies",
-							MinItems:    1,
 							Computed:    true,
 							Elem: &schema.Resource{
 								Schema: map[string]*schema.Schema{
@@ -111,21 +112,42 @@ func dataSourceKubernetesService() *schema.Resource {
 							Description: "Determines how the service is exposed. Defaults to `ClusterIP`. Valid options are `ExternalName`, `ClusterIP`, `NodePort`, and `LoadBalancer`. `ExternalName` maps to the specified `external_name`. More info: http://kubernetes.io/docs/user-guide/services#overview",
 							Computed:    true,
 						},
+						"health_check_node_port": {
+							Type:        schema.TypeInt,
+							Description: "Specifies the Healthcheck NodePort for the service. Only effects when type is set to `LoadBalancer` and external_traffic_policy is set to `Local`.",
+							Computed:    true,
+						},
 					},
 				},
 			},
-			"load_balancer_ingress": {
+			"status": {
 				Type:     schema.TypeList,
 				Computed: true,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
-						"ip": {
-							Type:     schema.TypeString,
+						"load_balancer": {
+							Type:     schema.TypeList,
 							Computed: true,
-						},
-						"hostname": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Elem: &schema.Resource{
+								Schema: map[string]*schema.Schema{
+									"ingress": {
+										Type:     schema.TypeList,
+										Computed: true,
+										Elem: &schema.Resource{
+											Schema: map[string]*schema.Schema{
+												"ip": {
+													Type:     schema.TypeString,
+													Computed: true,
+												},
+												"hostname": {
+													Type:     schema.TypeString,
+													Computed: true,
+												},
+											},
+										},
+									},
+								},
+							},
 						},
 					},
 				},
@@ -134,12 +156,12 @@ func dataSourceKubernetesService() *schema.Resource {
 	}
 }
 
-func dataSourceKubernetesServiceRead(d *schema.ResourceData, meta interface{}) error {
+func dataSourceKubernetesServiceRead(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	om := meta_v1.ObjectMeta{
 		Namespace: d.Get("metadata.0.namespace").(string),
 		Name:      d.Get("metadata.0.name").(string),
 	}
 	d.SetId(buildId(om))
 
-	return resourceKubernetesServiceRead(d, meta)
+	return resourceKubernetesServiceRead(ctx, d, meta)
 }

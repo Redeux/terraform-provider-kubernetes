@@ -1,8 +1,8 @@
 package kubernetes
 
 import (
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func handlerFields() map[string]*schema.Schema {
@@ -95,53 +95,24 @@ func handlerFields() map[string]*schema.Schema {
 func resourcesField() map[string]*schema.Schema {
 	return map[string]*schema.Schema{
 		"limits": {
-			Type:        schema.TypeList,
+			Type:        schema.TypeMap,
 			Optional:    true,
 			Computed:    true,
-			MaxItems:    1,
 			Description: "Describes the maximum amount of compute resources allowed. More info: http://kubernetes.io/docs/user-guide/compute-resources/",
-			Elem: &schema.Resource{
-				Schema: map[string]*schema.Schema{
-					"cpu": {
-						Type:             schema.TypeString,
-						Optional:         true,
-						Computed:         true,
-						ValidateFunc:     validateResourceQuantity,
-						DiffSuppressFunc: suppressEquivalentResourceQuantity,
-					},
-					"memory": {
-						Type:             schema.TypeString,
-						Optional:         true,
-						Computed:         true,
-						ValidateFunc:     validateResourceQuantity,
-						DiffSuppressFunc: suppressEquivalentResourceQuantity,
-					},
-				},
+			Elem: &schema.Schema{
+				Type: schema.TypeString,
 			},
+			DiffSuppressFunc: suppressEquivalentResourceQuantity,
 		},
 		"requests": {
-			Type:     schema.TypeList,
-			Optional: true,
-			Computed: true,
-			MaxItems: 1,
-			Elem: &schema.Resource{
-				Schema: map[string]*schema.Schema{
-					"cpu": {
-						Type:             schema.TypeString,
-						Optional:         true,
-						Computed:         true,
-						ValidateFunc:     validateResourceQuantity,
-						DiffSuppressFunc: suppressEquivalentResourceQuantity,
-					},
-					"memory": {
-						Type:             schema.TypeString,
-						Optional:         true,
-						Computed:         true,
-						ValidateFunc:     validateResourceQuantity,
-						DiffSuppressFunc: suppressEquivalentResourceQuantity,
-					},
-				},
+			Type:        schema.TypeMap,
+			Optional:    true,
+			Computed:    true,
+			Description: "Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. More info: https://kubernetes.io/docs/concepts/configuration/manage-compute-resources-container/",
+			Elem: &schema.Schema{
+				Type: schema.TypeString,
 			},
+			DiffSuppressFunc: suppressEquivalentResourceQuantity,
 		},
 	}
 }
@@ -207,14 +178,18 @@ func volumeMountFields() map[string]*schema.Schema {
 func containerFields(isUpdatable, isInitContainer bool) map[string]*schema.Schema {
 	s := map[string]*schema.Schema{
 		"args": {
-			Type:        schema.TypeList,
-			Optional:    true,
+			Type:     schema.TypeList,
+			Optional: true,
+			// The API will default this to [], so prevent non-empty plans by setting this to Computed.
+			Computed:    true,
 			Elem:        &schema.Schema{Type: schema.TypeString},
 			Description: "Arguments to the entrypoint. The docker image's CMD is used if this is not provided. Variable references $(VAR_NAME) are expanded using the container's environment. If a variable cannot be resolved, the reference in the input string will be unchanged. The $(VAR_NAME) syntax can be escaped with a double $$, ie: $$(VAR_NAME). Escaped references will never be expanded, regardless of whether the variable exists or not. Cannot be updated. More info: http://kubernetes.io/docs/user-guide/containers#containers-and-commands",
 		},
 		"command": {
-			Type:        schema.TypeList,
-			Optional:    true,
+			Type:     schema.TypeList,
+			Optional: true,
+			// The API will default this to [], so prevent non-empty plans by setting this to Computed.
+			Computed:    true,
 			Elem:        &schema.Schema{Type: schema.TypeString},
 			Description: "Entrypoint array. Not executed within a shell. The docker image's ENTRYPOINT is used if this is not provided. Variable references $(VAR_NAME) are expanded using the container's environment. If a variable cannot be resolved, the reference in the input string will be unchanged. The $(VAR_NAME) syntax can be escaped with a double $$, ie: $$(VAR_NAME). Escaped references will never be expanded, regardless of whether the variable exists or not. Cannot be updated. More info: http://kubernetes.io/docs/user-guide/containers#containers-and-commands",
 		},
@@ -298,6 +273,13 @@ func containerFields(isUpdatable, isInitContainer bool) map[string]*schema.Schem
 											"container_name": {
 												Type:     schema.TypeString,
 												Optional: true,
+											},
+											"divisor": {
+												Type:             schema.TypeString,
+												Optional:         true,
+												Default:          "1",
+												ValidateFunc:     validateResourceQuantity,
+												DiffSuppressFunc: suppressEquivalentResourceQuantity,
 											},
 											"resource": {
 												Type:        schema.TypeString,
@@ -526,6 +508,13 @@ func containerFields(isUpdatable, isInitContainer bool) map[string]*schema.Schem
 			Optional:    true,
 			Default:     "/dev/termination-log",
 			Description: "Optional: Path at which the file to which the container's termination message will be written is mounted into the container's filesystem. Message written is intended to be brief final status, such as an assertion failure message. Defaults to /dev/termination-log. Cannot be updated.",
+		},
+		"termination_message_policy": {
+			Type:         schema.TypeString,
+			Optional:     true,
+			ValidateFunc: validation.StringInSlice([]string{"File", "FallbackToLogsOnError"}, false),
+			Computed:     true,
+			Description:  "Optional: Indicate how the termination message should be populated. File will use the contents of terminationMessagePath to populate the container status message on both success and failure. FallbackToLogsOnError will use the last chunk of container log output if the termination message file is empty and the container exited with an error. The log output is limited to 2048 bytes or 80 lines, whichever is smaller. Defaults to File. Cannot be updated.",
 		},
 		"tty": {
 			Type:        schema.TypeBool,

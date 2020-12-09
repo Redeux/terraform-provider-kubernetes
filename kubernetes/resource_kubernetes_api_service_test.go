@@ -1,13 +1,14 @@
 package kubernetes
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/acctest"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/terraform"
-	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestAccKubernetesAPIService_basic(t *testing.T) {
@@ -16,10 +17,10 @@ func TestAccKubernetesAPIService_basic(t *testing.T) {
 	name := fmt.Sprintf("%s.%s", version, group)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:      func() { testAccPreCheck(t) },
-		IDRefreshName: "kubernetes_api_service.test",
-		Providers:     testAccProviders,
-		CheckDestroy:  testAccCheckKubernetesAPIServiceDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		IDRefreshName:     "kubernetes_api_service.test",
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccCheckKubernetesAPIServiceDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccKubernetesAPIServiceConfig_basic(name, group, version),
@@ -110,36 +111,12 @@ func TestAccKubernetesAPIService_basic(t *testing.T) {
 	})
 }
 
-func TestAccKubernetesAPIService_importBasic(t *testing.T) {
-	resourceName := "kubernetes_api_service.test"
-	group := fmt.Sprintf("tf-acc-test-%s.k8s.io", acctest.RandStringFromCharSet(10, acctest.CharSetAlphaNum))
-	version := "v1beta1"
-	name := fmt.Sprintf("%s.%s", version, group)
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckKubernetesAPIServiceDestroy,
-		Steps: []resource.TestStep{
-			{
-				Config: testAccKubernetesAPIServiceConfig_basic(name, group, version),
-			},
-
-			{
-				ResourceName:            resourceName,
-				ImportState:             true,
-				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"metadata.0.resource_version"},
-			},
-		},
-	})
-}
-
 func testAccCheckKubernetesAPIServiceDestroy(s *terraform.State) error {
 	conn, err := testAccProvider.Meta().(KubeClientsets).AggregatorClientset()
 	if err != nil {
 		return err
 	}
+	ctx := context.TODO()
 
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "kubernetes_api_service" {
@@ -148,7 +125,7 @@ func testAccCheckKubernetesAPIServiceDestroy(s *terraform.State) error {
 
 		name := rs.Primary.ID
 
-		resp, err := conn.ApiregistrationV1().APIServices().Get(name, meta_v1.GetOptions{})
+		resp, err := conn.ApiregistrationV1().APIServices().Get(ctx, name, metav1.GetOptions{})
 		if err == nil {
 			if resp.Name == rs.Primary.ID {
 				return fmt.Errorf("Service still exists: %s", rs.Primary.ID)
@@ -170,10 +147,11 @@ func testAccCheckKubernetesAPIServiceExists(n string) resource.TestCheckFunc {
 		if err != nil {
 			return err
 		}
+		ctx := context.TODO()
 
 		name := rs.Primary.ID
 
-		_, err = conn.ApiregistrationV1().APIServices().Get(name, meta_v1.GetOptions{})
+		_, err = conn.ApiregistrationV1().APIServices().Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
@@ -183,8 +161,7 @@ func testAccCheckKubernetesAPIServiceExists(n string) resource.TestCheckFunc {
 }
 
 func testAccKubernetesAPIServiceConfig_basic(name, group, version string) string {
-	return fmt.Sprintf(`
-resource "kubernetes_api_service" "test" {
+	return fmt.Sprintf(`resource "kubernetes_api_service" "test" {
   metadata {
     annotations = {
       TestAnnotationOne = "one"
@@ -202,12 +179,12 @@ resource "kubernetes_api_service" "test" {
 
   spec {
     service {
-      name        = "metrics-server"
-      namespace   = "kube-system"
+      name      = "metrics-server"
+      namespace = "kube-system"
     }
 
     group                  = "%s"
-    group_priority_minimum  = 1
+    group_priority_minimum = 1
 
     version          = "%s"
     version_priority = 1
@@ -219,66 +196,64 @@ resource "kubernetes_api_service" "test" {
 }
 
 func testAccKubernetesAPIServiceConfig_modified(name, group, version string) string {
-	return fmt.Sprintf(`
-  resource "kubernetes_api_service" "test" {
-    metadata {
-      annotations = {
-        TestAnnotationOne = "one"
-      }
-
-      labels = {
-        TestLabelOne = "one"
-        TestLabelTwo = "two"
-      }
-
-      name = "%s"
+	return fmt.Sprintf(`resource "kubernetes_api_service" "test" {
+  metadata {
+    annotations = {
+      TestAnnotationOne = "one"
     }
 
-    spec {
-      service {
-        name        = "metrics-server"
-        namespace   = "kube-system"
-        port        = 8443
-      }
-
-      group                  = "%s"
-      group_priority_minimum = 100
-
-      version          = "%s"
-      version_priority = 100
-
-      ca_bundle = "data"
-      insecure_skip_tls_verify = false
+    labels = {
+      TestLabelOne = "one"
+      TestLabelTwo = "two"
     }
+
+    name = "%s"
   }
+
+  spec {
+    service {
+      name      = "metrics-server"
+      namespace = "kube-system"
+      port      = 8443
+    }
+
+    group                  = "%s"
+    group_priority_minimum = 100
+
+    version          = "%s"
+    version_priority = 100
+
+    ca_bundle                = "data"
+    insecure_skip_tls_verify = false
+  }
+}
 `, name, group, version)
 }
 
 func testAccKubernetesAPIServiceConfig_modified_local_service(name, group, version string) string {
-	return fmt.Sprintf(`
-  resource "kubernetes_api_service" "test" {
-    metadata {
-      annotations = {
-        TestAnnotationOne = "one"
-      }
-
-      labels = {
-        TestLabelOne = "one"
-        TestLabelTwo = "two"
-      }
-
-      name = "%s"
+	return fmt.Sprintf(`resource "kubernetes_api_service" "test" {
+  metadata {
+    annotations = {
+      TestAnnotationOne = "one"
     }
 
-    spec {
-      group                  = "%s"
-      group_priority_minimum = 100
-
-      version          = "%s"
-      version_priority = 100
-
-      insecure_skip_tls_verify = false
+    labels = {
+      TestLabelOne = "one"
+      TestLabelTwo = "two"
     }
+
+    name = "%s"
   }
+
+  spec {
+    group                  = "%s"
+    group_priority_minimum = 100
+
+    version          = "%s"
+    version_priority = 100
+
+    insecure_skip_tls_verify = false
+  }
+}
 `, name, group, version)
 }

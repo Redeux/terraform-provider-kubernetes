@@ -1,18 +1,21 @@
 package kubernetes
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"regexp"
 	"time"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
+
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	pkgApi "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -23,13 +26,12 @@ const (
 
 func resourceKubernetesDeployment() *schema.Resource {
 	return &schema.Resource{
-		Create: resourceKubernetesDeploymentCreate,
-		Read:   resourceKubernetesDeploymentRead,
-		Exists: resourceKubernetesDeploymentExists,
-		Update: resourceKubernetesDeploymentUpdate,
-		Delete: resourceKubernetesDeploymentDelete,
+		CreateContext: resourceKubernetesDeploymentCreate,
+		ReadContext:   resourceKubernetesDeploymentRead,
+		UpdateContext: resourceKubernetesDeploymentUpdate,
+		DeleteContext: resourceKubernetesDeploymentDelete,
 		Importer: &schema.ResourceImporter{
-			State: schema.ImportStatePassthrough,
+			StateContext: schema.ImportStatePassthroughContext,
 		},
 
 		Timeouts: &schema.ResourceTimeout{
@@ -66,10 +68,11 @@ func resourceKubernetesDeployment() *schema.Resource {
 							Default:     600,
 						},
 						"replicas": {
-							Type:        schema.TypeInt,
-							Description: "The number of desired replicas. Defaults to 1. More info: http://kubernetes.io/docs/user-guide/replication-controller#what-is-a-replication-controller",
-							Optional:    true,
-							Default:     1,
+							Type:         schema.TypeString,
+							Description:  "Number of desired pods. This is a string to be able to distinguish between explicit zero and not specified.",
+							Optional:     true,
+							Computed:     true,
+							ValidateFunc: validateTypeStringNullableInt,
 						},
 						"revision_history_limit": {
 							Type:        schema.TypeInt,
@@ -190,20 +193,26 @@ func resourceKubernetesDeployment() *schema.Resource {
 					},
 				},
 			},
+			"wait_for_rollout": {
+				Type:        schema.TypeBool,
+				Description: "Wait for the rollout of the deployment to complete. Defaults to true.",
+				Default:     true,
+				Optional:    true,
+			},
 		},
 	}
 }
 
-func resourceKubernetesDeploymentCreate(d *schema.ResourceData, meta interface{}) error {
+func resourceKubernetesDeploymentCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	metadata := expandMetadata(d.Get("metadata").([]interface{}))
 	spec, err := expandDeploymentSpec(d.Get("spec").([]interface{}))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	deployment := appsv1.Deployment{
@@ -212,36 +221,38 @@ func resourceKubernetesDeploymentCreate(d *schema.ResourceData, meta interface{}
 	}
 
 	log.Printf("[INFO] Creating new deployment: %#v", deployment)
-	out, err := conn.AppsV1().Deployments(metadata.Namespace).Create(&deployment)
+	out, err := conn.AppsV1().Deployments(metadata.Namespace).Create(ctx, &deployment, metav1.CreateOptions{})
 	if err != nil {
-		return fmt.Errorf("Failed to create deployment: %s", err)
+		return diag.Errorf("Failed to create deployment: %s", err)
 	}
 
 	d.SetId(buildId(out.ObjectMeta))
 
 	log.Printf("[DEBUG] Waiting for deployment %s to schedule %d replicas", d.Id(), *out.Spec.Replicas)
 
-	// 10 mins should be sufficient for scheduling ~10k replicas
-	err = resource.Retry(d.Timeout(schema.TimeoutCreate),
-		waitForDeploymentReplicasFunc(conn, out.GetNamespace(), out.GetName()))
-	if err != nil {
-		return err
+	if d.Get("wait_for_rollout").(bool) {
+		log.Printf("[INFO] Waiting for deployment %s/%s to rollout", out.ObjectMeta.Namespace, out.ObjectMeta.Name)
+		err := resource.RetryContext(ctx, d.Timeout(schema.TimeoutCreate),
+			waitForDeploymentReplicasFunc(ctx, conn, out.GetNamespace(), out.GetName()))
+		if err != nil {
+			return diag.FromErr(err)
+		}
 	}
 
 	log.Printf("[INFO] Submitted new deployment: %#v", out)
 
-	return resourceKubernetesDeploymentRead(d, meta)
+	return resourceKubernetesDeploymentRead(ctx, d, meta)
 }
 
-func resourceKubernetesDeploymentUpdate(d *schema.ResourceData, meta interface{}) error {
+func resourceKubernetesDeploymentUpdate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	namespace, name, err := idParts(d.Id())
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	ops := patchMetadata("metadata.0.", "/metadata/", d)
@@ -249,7 +260,7 @@ func resourceKubernetesDeploymentUpdate(d *schema.ResourceData, meta interface{}
 	if d.HasChange("spec") {
 		spec, err := expandDeploymentSpec(d.Get("spec").([]interface{}))
 		if err != nil {
-			return err
+			return diag.FromErr(err)
 		}
 
 		ops = append(ops, &ReplaceOperation{
@@ -259,77 +270,103 @@ func resourceKubernetesDeploymentUpdate(d *schema.ResourceData, meta interface{}
 	}
 	data, err := ops.MarshalJSON()
 	if err != nil {
-		return fmt.Errorf("Failed to marshal update operations: %s", err)
+		return diag.Errorf("Failed to marshal update operations: %s", err)
 	}
 	log.Printf("[INFO] Updating deployment %q: %v", name, string(data))
-	out, err := conn.AppsV1().Deployments(namespace).Patch(name, pkgApi.JSONPatchType, data)
+	out, err := conn.AppsV1().Deployments(namespace).Patch(ctx, name, types.JSONPatchType, data, metav1.PatchOptions{})
 	if err != nil {
-		return fmt.Errorf("Failed to update deployment: %s", err)
+		return diag.Errorf("Failed to update deployment: %s", err)
 	}
 	log.Printf("[INFO] Submitted updated deployment: %#v", out)
 
-	err = resource.Retry(d.Timeout(schema.TimeoutUpdate),
-		waitForDeploymentReplicasFunc(conn, namespace, name))
-	if err != nil {
-		return err
+	if d.Get("wait_for_rollout").(bool) {
+		log.Printf("[INFO] Waiting for deployment %s/%s to rollout", out.ObjectMeta.Namespace, out.ObjectMeta.Name)
+		err := resource.RetryContext(ctx, d.Timeout(schema.TimeoutCreate),
+			waitForDeploymentReplicasFunc(ctx, conn, out.GetNamespace(), out.GetName()))
+		if err != nil {
+			return diag.FromErr(err)
+		}
 	}
 
-	return resourceKubernetesDeploymentRead(d, meta)
+	return resourceKubernetesDeploymentRead(ctx, d, meta)
 }
 
-func resourceKubernetesDeploymentRead(d *schema.ResourceData, meta interface{}) error {
+func resourceKubernetesDeploymentRead(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	exists, err := resourceKubernetesDeploymentExists(ctx, d, meta)
+	if err != nil {
+		return diag.FromErr(err)
+	}
+	if !exists {
+		return diag.Diagnostics{}
+	}
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	namespace, name, err := idParts(d.Id())
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	log.Printf("[INFO] Reading deployment %s", name)
-	deployment, err := conn.AppsV1().Deployments(namespace).Get(name, metav1.GetOptions{})
+	deployment, err := conn.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		log.Printf("[DEBUG] Received error: %#v", err)
-		return err
+		return diag.FromErr(err)
 	}
 	log.Printf("[INFO] Received deployment: %#v", deployment)
 
 	err = d.Set("metadata", flattenMetadata(deployment.ObjectMeta, d))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	spec, err := flattenDeploymentSpec(deployment.Spec, d)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	err = d.Set("spec", spec)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	return nil
 }
 
-func resourceKubernetesDeploymentDelete(d *schema.ResourceData, meta interface{}) error {
+func resourceKubernetesDeploymentDelete(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	namespace, name, err := idParts(d.Id())
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	log.Printf("[INFO] Deleting deployment: %#v", name)
 
-	err = conn.AppsV1().Deployments(namespace).Delete(name, &deleteOptions)
+	err = conn.AppsV1().Deployments(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	if err != nil {
-		return err
+		return diag.FromErr(err)
+	}
+
+	err = resource.RetryContext(ctx, d.Timeout(schema.TimeoutDelete), func() *resource.RetryError {
+		_, err := conn.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			if statusErr, ok := err.(*errors.StatusError); ok && statusErr.ErrStatus.Code == 404 {
+				return nil
+			}
+			return resource.NonRetryableError(err)
+		}
+
+		e := fmt.Errorf("Deployment (%s) still exists", d.Id())
+		return resource.RetryableError(e)
+	})
+	if err != nil {
+		return diag.FromErr(err)
 	}
 
 	log.Printf("[INFO] Deployment %s deleted", name)
@@ -338,7 +375,7 @@ func resourceKubernetesDeploymentDelete(d *schema.ResourceData, meta interface{}
 	return nil
 }
 
-func resourceKubernetesDeploymentExists(d *schema.ResourceData, meta interface{}) (bool, error) {
+func resourceKubernetesDeploymentExists(ctx context.Context, d *schema.ResourceData, meta interface{}) (bool, error) {
 	conn, err := meta.(KubeClientsets).MainClientset()
 	if err != nil {
 		return false, err
@@ -350,7 +387,7 @@ func resourceKubernetesDeploymentExists(d *schema.ResourceData, meta interface{}
 	}
 
 	log.Printf("[INFO] Checking deployment %s", name)
-	_, err = conn.AppsV1().Deployments(namespace).Get(name, metav1.GetOptions{})
+	_, err = conn.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		if statusErr, ok := err.(*errors.StatusError); ok && statusErr.ErrStatus.Code == 404 {
 			return false, nil
@@ -372,12 +409,17 @@ func GetDeploymentCondition(status appsv1.DeploymentStatus, condType appsv1.Depl
 	return nil
 }
 
-func waitForDeploymentReplicasFunc(conn *kubernetes.Clientset, ns, name string) resource.RetryFunc {
+func waitForDeploymentReplicasFunc(ctx context.Context, conn *kubernetes.Clientset, ns, name string) resource.RetryFunc {
 	return func() *resource.RetryError {
 		// Query the deployment to get a status update.
-		dply, err := conn.AppsV1().Deployments(ns).Get(name, metav1.GetOptions{})
+		dply, err := conn.AppsV1().Deployments(ns).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return resource.NonRetryableError(err)
+		}
+
+		var specReplicas int32 = 1 // default, according to API docs
+		if dply.Spec.Replicas != nil {
+			specReplicas = *dply.Spec.Replicas
 		}
 
 		if dply.Generation <= dply.Status.ObservedGeneration {
@@ -387,12 +429,16 @@ func waitForDeploymentReplicasFunc(conn *kubernetes.Clientset, ns, name string) 
 				return resource.NonRetryableError(err)
 			}
 
-			if dply.Status.UpdatedReplicas < *dply.Spec.Replicas {
-				return resource.RetryableError(fmt.Errorf("Waiting for rollout to finish: %d out of %d new replicas have been updated...", dply.Status.UpdatedReplicas, dply.Spec.Replicas))
+			if dply.Status.UpdatedReplicas < specReplicas {
+				return resource.RetryableError(fmt.Errorf("Waiting for rollout to finish: %d out of %d new replicas have been updated...", dply.Status.UpdatedReplicas, specReplicas))
 			}
 
 			if dply.Status.Replicas > dply.Status.UpdatedReplicas {
 				return resource.RetryableError(fmt.Errorf("Waiting for rollout to finish: %d old replicas are pending termination...", dply.Status.Replicas-dply.Status.UpdatedReplicas))
+			}
+
+			if dply.Status.Replicas > dply.Status.ReadyReplicas {
+				return resource.RetryableError(fmt.Errorf("Waiting for rollout to finish: %d replicas wanted; %d replicas Ready", dply.Status.Replicas, dply.Status.ReadyReplicas))
 			}
 
 			if dply.Status.AvailableReplicas < dply.Status.UpdatedReplicas {

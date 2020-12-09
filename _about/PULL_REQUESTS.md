@@ -22,12 +22,12 @@ expect:
 
 1. Once you believe your pull request is ready to be reviewed, ensure the
    pull request is not a draft pull request by [marking it ready for review](https://help.github.com/en/articles/changing-the-stage-of-a-pull-request) and a
-   maintainer will review it.
+   maintainer will review it. Adding [tests](https://github.com/hashicorp/terraform-provider-kubernetes/blob/master/_about/CONTRIBUTING.md#tests) will help speed up our acceptance of your PR.
 
 1. One of Terraform's provider team members will look over your contribution and
    either approve it or provide comments letting you know if there is anything
    left to do. We do our best to keep up with the volume of PRs waiting for
-   review, but it will take some time for us to reach your PR based on the tasks we have in our backlog.
+   review, but it will take some time for us to reach your PR based on the tasks we have in our backlog. Please do not leave LGTM comments or approvals on PRs unless you are a maintainer on the repository.
 
 1. Once all outstanding comments and checklist items have been addressed, your
    contribution will be merged! Merged PRs will be included in the next
